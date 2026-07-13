@@ -36,3 +36,40 @@ def test_readyz_ok(client):
 
 def test_readyz_503_when_db_unreachable(client_bad_db):
     assert client_bad_db.get("/readyz").status_code == 503
+
+
+@pytest.fixture
+def app_with_probe_route(monkeypatch):
+    from fastapi import Depends
+
+    from backend.app.deps import get_current_user, get_db
+
+    monkeypatch.setenv(
+        "PANTRYOPS_DATABASE_URL",
+        "postgresql+psycopg://pantryops:pantryops@localhost:5432/pantryops",
+    )
+    monkeypatch.setenv("PANTRYOPS_REDIS_URL", "redis://localhost:6379/0")
+    app = create_app()
+
+    @app.get("/_probe")
+    def probe(db=Depends(get_db), user=Depends(get_current_user)):
+        return {"user_id": user.user_id, "db_open": db.is_active}
+
+    return app
+
+
+def test_get_current_user_returns_dev_user(app_with_probe_route):
+    r = TestClient(app_with_probe_route).get("/_probe")
+    assert r.status_code == 200
+    assert r.json() == {"user_id": "dev-user-001", "db_open": True}
+
+
+def test_dependencies_can_be_overridden(app_with_probe_route):
+    from backend.app.deps import get_current_user
+
+    class FakeUser:
+        user_id = "override-user"
+
+    app_with_probe_route.dependency_overrides[get_current_user] = lambda: FakeUser()
+    r = TestClient(app_with_probe_route).get("/_probe")
+    assert r.json()["user_id"] == "override-user"
