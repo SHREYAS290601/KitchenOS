@@ -1,14 +1,33 @@
+import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+
+import { getHealth } from "../api/client";
 
 const SECTIONS = ["Checklist", "Pantry", "Assist", "Check-in", "Settings"] as const;
 
+type Reachability = "checking" | "reachable" | "unreachable";
+
 export default function HomeScreen() {
+  const [backend, setBackend] = useState<Reachability>("checking");
+
+  useEffect(() => {
+    let active = true;
+    getHealth().then((result) => {
+      if (active) setBackend(result.ok ? "reachable" : "unreachable");
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <View style={styles.container}>
       <Text accessibilityRole="header" style={styles.heading}>
         PantryOps Edge
       </Text>
-      <Text style={styles.status}>Backend: status unknown</Text>
+      <Text accessibilityLiveRegion="polite" style={styles.status}>
+        Backend: {backend}
+      </Text>
       <View style={styles.sections}>
         {SECTIONS.map((section) => (
           <View key={section} style={styles.sectionStub}>
