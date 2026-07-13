@@ -14,3 +14,9 @@ __pycache__/
 # Node / Expo (Phase 1+)
 node_modules/
 .expo/
+
+# Build artifacts
+dist/
+
+# User data (never commit uploads)
+data/user_uploads/
