@@ -34,7 +34,7 @@ def test_upgrade_head_matches_metadata():
     eng.dispose()
 
     dump_metadata = (
-        "import json; from backend.app.db import Base; "
+        "import json; import backend.app.models; from backend.app.db import Base; "
         "print(json.dumps({t.name: sorted(c.name for c in t.columns) "
         "for t in Base.metadata.sorted_tables}))"
     )
