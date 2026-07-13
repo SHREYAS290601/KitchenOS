@@ -199,7 +199,7 @@ Category/count evidence only — never brand identity.
 { "ocr_id": "ocr_001", "image_id": "img_001", "crop_uri": "s3://bucket/crops/item_001.png",
   "raw_text": "CHOBANI GREEK YOGURT 32 OZ",
   "structured_fields": { "brand": "Chobani", "product_name": "Greek Yogurt", "package_size": "32 oz" },
-  "confidence": 0.84, "engine": "paddleocr", "created_at": "timestamp" }
+  "confidence": 0.84, "engine": "paddleocr-vl-1.6", "created_at": "timestamp" }
 ```
 
 Structured fields are candidates — they enter the ledger as estimates via Source Attribution, never as confirmed values.

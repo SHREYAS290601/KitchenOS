@@ -35,7 +35,8 @@ Concretely:
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0 (sync, psycopg 3), Pydantic v2, Alembic, PostgreSQL 16, Celery + Redis, MinIO/S3. Managed with `uv`.
 - **Mobile:** Expo (React Native), TypeScript, expo-router, AsyncStorage.
-- **Vision:** YOLO/RT-DETR detection, SAM-style segmentation, PaddleOCR, barcode scanning.
+- **Vision:** RF-DETR (nano/small) detection, SAM3 segmentation, PaddleOCR-VL v1.6, barcode scanning.
+- **LLM/agents:** deepseek/deepseek-v4-flash via OpenRouter; LangGraph + LangSmith orchestration (ADR 003).
 - **Tests:** pytest + httpx TestClient (backend, real local Postgres, Celery eager); Jest + @testing-library/react-native (mobile).
 
 ## How to work

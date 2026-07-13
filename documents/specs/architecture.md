@@ -23,7 +23,7 @@ Hosted Backend (FastAPI, single package)
   ├── background jobs         (Celery + Redis)
   ├── vision services         (vision/: detect, segment, OCR, barcode)
   ├── product enrichment      (products/: Open Food Facts, USDA)
-  ├── LLM agent orchestration (agents/: 19 agents, custom state machine)
+  ├── LLM agent orchestration (agents/: 19 agents, LangGraph + LangSmith)
   └── audit layer             (agents/auditor.py — last gate on every output)
 ```
 
@@ -111,7 +111,8 @@ Durability rule: **the `BackgroundJob` row is written in the same DB transaction
 ## 7. LLM agent layer
 
 - Agents produce **proposals, never writes**. Any ledger change is a structured tool call routed into `services/ledger.py::apply_update()` — the single write path. The LLM emits JSON matching a Pydantic tool schema; the tool validates and commits. This is the manifest's Evidence Rule (§9) and §15.12 "LLM cannot directly mutate inventory," made structural.
-- **Orchestration:** a custom state machine (chosen over LangGraph for MVP — fewer moving parts, deterministic tests). `agents/input_router.py` normalizes intent and selects downstream agents; each agent is a class with typed `run(context) -> proposal`.
+- **Orchestration:** LangGraph (stateful agent graphs) with LangSmith tracing — decided 2026-07-13, superseding the earlier custom-state-machine choice (ADR 003). `agents/input_router.py` is the entry node that normalizes intent and routes to downstream agent nodes; each agent remains a typed unit `run(context) -> proposal`. The invariant is unchanged: LLM/agent nodes only produce proposals — every ledger write still goes through `services/ledger.py::apply_update()` as a structured tool call.
+- **LLM:** `deepseek/deepseek-v4-flash` served through OpenRouter (fast, low-latency planning/explanation). Model id and key come from env (`PANTRYOPS_LLM_MODEL`, `PANTRYOPS_LLM_API_KEY`); no model name is hardcoded in agent code.
 - **Auditor last:** `agents/auditor.py` runs on every final user-facing output and every batch of ledger proposals before commit. It checks dietary-restriction violations, recipes using unavailable items, unsourced updates, low-confidence-shown-as-fact, preference overgeneralization, and silent-mode-without-consent. The auditor can block or downgrade a proposal to "needs review."
 - **Structured output everywhere:** agents return Pydantic models, so `source`, `confidence`, `status` are never optional free-text.
 

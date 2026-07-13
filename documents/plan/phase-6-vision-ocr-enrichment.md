@@ -6,7 +6,7 @@
 
 **Architecture:** Per `documents/specs/architecture.md` §9 (precedence: barcode > label_ocr > product_detection > segmentation) and `documents/specs/agents.md` #7–#10, #18. Real models live behind the `vision/` interfaces so **the Phase-5 pipeline shape is unchanged** — only step bodies change. Detection yields category/count only, never brand (§15.7). OCR fields are candidates with confidence, never silently corrected (§15.9). The Barcode Agent returns nothing rather than inventing a value (§15.10). The Source Attribution Agent (§15.18) guarantees every field has value + source + confidence + status before it reaches `apply_update()`.
 
-**Tech Stack:** Ultralytics YOLO (or RT-DETR) for grocery detection, SAM/SAM2-style segmentation, PaddleOCR (EasyOCR fallback), pyzbar for barcodes, Pillow/OpenCV preprocessing. Unit tests run on **recorded fixtures** in `tests/fixtures/vision/` — model-inference tests are marked `-m integration` and excluded from the default run.
+**Tech Stack:** Roboflow RF-DETR (rf-detr-nano, rf-detr-small if accuracy needs it) for grocery detection, SAM3 segmentation, PaddleOCR-VL v1.6 (`PaddleOCRVL(pipeline_version="v1.6")`), pyzbar for barcodes, Pillow/OpenCV preprocessing. Unit tests run on **recorded fixtures** in `tests/fixtures/vision/` — model-inference tests are marked `-m integration` and excluded from the default run.
 
 **Out of scope for Phase 6** (later plans): external product/nutrition APIs (Phase 7), recipe/consumption (Phase 8), receipt-specific parsing beyond raw OCR (post-MVP; CORD experiments live in `evaluation/` only).
 
@@ -20,9 +20,9 @@
 backend/app/
 ├── vision/
 │   ├── preprocessing.py            # resize/normalize/crop helpers
-│   ├── detector.py                 # YOLO/RT-DETR wrapper → labels, bboxes, counts
-│   ├── segmenter.py                # SAM-style masks + crops → storage/
-│   ├── ocr.py                      # PaddleOCR wrapper → raw text + structured candidates
+│   ├── detector.py                 # RF-DETR wrapper → labels, bboxes, counts
+│   ├── segmenter.py                # SAM3 masks + crops → storage/
+│   ├── ocr.py                      # PaddleOCR-VL v1.6 wrapper → raw text + structured candidates
 │   └── barcode.py                  # pyzbar wrapper → value or None
 ├── models/
 │   ├── vision_detection.py         # §14.5
@@ -67,7 +67,7 @@ Rule for the whole phase: `vision/` modules take an image (bytes/array) and retu
 
 - [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_detector.py -v` → FAIL (ImportError).
 
-- [ ] **Step 3: Implement `preprocessing.py`** (Pillow-based, no model deps) and commit 3–5 small sample images + expected-output JSON into `tests/fixtures/vision/`. Write `scripts/fetch_models.py` (downloads YOLO/SAM/PaddleOCR weights to `data/models/`, idempotent).
+- [ ] **Step 3: Implement `preprocessing.py`** (Pillow-based, no model deps) and commit 3–5 small sample images + expected-output JSON into `tests/fixtures/vision/`. Write `scripts/fetch_models.py` (downloads RF-DETR/SAM3/PaddleOCR-VL weights to `data/models/`, idempotent).
 
 - [ ] **Step 4: Verify pass. Commit** — `feat(vision): preprocessing helpers and recorded test fixtures`
 
@@ -79,11 +79,11 @@ Rule for the whole phase: `vision/` modules take an image (bytes/array) and retu
 - Create: `backend/app/vision/detector.py`, `backend/app/models/vision_detection.py`, `backend/app/agents/edge_vision.py`, migration
 - Test: `tests/test_detector.py` (extend)
 
-- [ ] **Step 1: Write the failing tests** — unit (fixture-driven, detector injected as a fake returning recorded outputs): `detect(img)` returns `[Detection(label, bbox, confidence)]`; count estimate for 4 recorded tomato boxes is 4; **the Detection type has no brand field** (assert on the schema — §15.7 forbidden). Integration (`@pytest.mark.integration`): real YOLO on a sample grocery photo returns ≥1 detection with confidence ∈ (0,1].
+- [ ] **Step 1: Write the failing tests** — unit (fixture-driven, detector injected as a fake returning recorded outputs): `detect(img)` returns `[Detection(label, bbox, confidence)]`; count estimate for 4 recorded tomato boxes is 4; **the Detection type has no brand field** (assert on the schema — §15.7 forbidden). Integration (`@pytest.mark.integration`): real RF-DETR on a sample grocery photo returns ≥1 detection with confidence ∈ (0,1].
 
 - [ ] **Step 2: Run to verify they fail** — default run FAIL on unit tests; integration excluded (`addopts` gains `-m "not integration"`).
 
-- [ ] **Step 3: Implement** — `detector.py::Detector` protocol + `YoloDetector` impl (lazy weight load from `data/models/`); `models/vision_detection.py` per §14.5 (label, bbox JSONB, confidence, model_name); `agents/edge_vision.py` wraps detect → typed proposal with count estimates, no ledger access. Migration for the three vision tables lands here (hand-review JSONB defaults).
+- [ ] **Step 3: Implement** — `detector.py::Detector` protocol + `RfDetrDetector` impl (lazy weight load from `data/models/`); `models/vision_detection.py` per §14.5 (label, bbox JSONB, confidence, model_name); `agents/edge_vision.py` wraps detect → typed proposal with count estimates, no ledger access. Migration for the three vision tables lands here (hand-review JSONB defaults).
 
 - [ ] **Step 4: Verify pass** — `uv run pytest tests/test_detector.py -v` then once: `uv run pytest -m integration tests/test_detector.py -v`.
 
@@ -101,7 +101,7 @@ Rule for the whole phase: `vision/` modules take an image (bytes/array) and retu
 
 - [ ] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — `Segmenter` protocol + SAM-style impl (integration-only), plus a bbox-crop fallback used when no GPU (config flag `PANTRYOPS_VISION_SEGMENTER=sam|bbox`). Fake segmenter for unit tests.
+- [ ] **Step 3: Implement** — `Segmenter` protocol + SAM3 impl (integration-only), plus a bbox-crop fallback used when no GPU (config flag `PANTRYOPS_VISION_SEGMENTER=sam3|bbox`). Fake segmenter for unit tests.
 
 - [ ] **Step 4: Verify pass. Commit** — `feat(vision): segmentation with crops persisted to object storage`
 
@@ -117,7 +117,7 @@ Rule for the whole phase: `vision/` modules take an image (bytes/array) and retu
 
 - [ ] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — `ocr.py::Ocr` protocol + `PaddleOcr` impl (integration) + fixture-replay fake; rule-based field structurer (brand = first line match against known-brand list, size = regex `\d+\s?(oz|g|ml|lb|l)\b`, remainder → product_name candidate). `models/ocr_result.py` per §14.7. Agent returns candidates as SourcedFields with `source="label_ocr"`.
+- [ ] **Step 3: Implement** — `ocr.py::Ocr` protocol + `PaddleOcrVl` impl (PaddleOCR-VL v1.6 `predict()` pipeline, integration) + fixture-replay fake; rule-based field structurer (brand = first line match against known-brand list, size = regex `\d+\s?(oz|g|ml|lb|l)\b`, remainder → product_name candidate). `models/ocr_result.py` per §14.7. Agent returns candidates as SourcedFields with `source="label_ocr"`.
 
 - [ ] **Step 4: Verify pass. Commit** — `feat(vision): ocr with structured estimate candidates, raw text preserved`
 

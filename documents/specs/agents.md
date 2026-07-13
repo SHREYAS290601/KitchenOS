@@ -2,7 +2,7 @@
 
 The 19 agents from `Manifest.md` §15. Each is a class in `backend/app/agents/` with a typed `run(context) -> proposal` method. Agents produce **proposals**; only structured tools commit ledger changes through `services/ledger.py::apply_update()` (invariants 1 and 5 in `architecture.md` §8). The Auditor is the last gate on every user-facing output and every proposal batch.
 
-Orchestration is a custom state machine — no LangGraph at MVP. The Input Router selects agents; each agent's forbidden actions are covered by at least one test.
+Orchestration is LangGraph with LangSmith tracing (decided 2026-07-13, ADR 003). The Input Router is the entry node that routes to agent nodes; each agent's forbidden actions are covered by at least one test, and no graph node writes the ledger directly.
 
 | # | Agent | File | Enforces invariant |
 | - | ----- | ---- | ------------------ |
