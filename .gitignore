@@ -1,0 +1,16 @@
+# Secrets
+.env
+.env.local
+
+# OS
+.DS_Store
+
+# Python (Phase 1+)
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Node / Expo (Phase 1+)
+node_modules/
+.expo/
