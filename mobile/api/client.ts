@@ -53,6 +53,40 @@ export async function getPantryItem(
   return { ok: true, data };
 }
 
+export type ConfirmResult =
+  | { ok: true; pantryItemId: string | null; alreadyConfirmed?: boolean }
+  | { ok: false; message: string };
+
+export async function confirmShoppingItem(
+  listId: string,
+  itemId: string,
+): Promise<ConfirmResult> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `${BASE_URL}/shopping-lists/${listId}/items/${itemId}/confirm`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "bought" }),
+      },
+    );
+  } catch {
+    return { ok: false, message: "Could not reach the server to cross off this item" };
+  }
+  if (response.status === 409) {
+    return { ok: true, pantryItemId: null, alreadyConfirmed: true };
+  }
+  const body = (await response.json()) as {
+    pantry_item_id?: string;
+    detail?: string;
+  };
+  if (!response.ok) {
+    return { ok: false, message: body.detail ?? "Cross-off failed" };
+  }
+  return { ok: true, pantryItemId: body.pantry_item_id ?? null };
+}
+
 export async function postFieldAction(
   itemId: string,
   fieldName: string,
