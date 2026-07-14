@@ -2,7 +2,7 @@ from fastapi import FastAPI
 
 from backend.app.config import Settings
 from backend.app.db import make_engine, make_session_factory
-from backend.app.routes import health, pantry
+from backend.app.routes import health, pantry, shopping
 
 
 def create_app() -> FastAPI:
@@ -16,5 +16,6 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(pantry.router)
+    app.include_router(shopping.router)
 
     return app
