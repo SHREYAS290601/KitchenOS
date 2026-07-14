@@ -80,3 +80,36 @@ def test_no_duplicate_planned_items_per_list(db):
     with pytest.raises(IntegrityError):
         db.commit()
     db.rollback()
+
+
+def test_confirmation_event_defaults_and_uniqueness(db):
+    from backend.app.models.confirmation_event import ShoppingConfirmationEvent
+
+    shopping_list = _list()
+    db.add(shopping_list)
+    db.flush()
+    item = _item(shopping_list.shopping_list_id)
+    db.add(item)
+    db.flush()
+
+    event = ShoppingConfirmationEvent(
+        shopping_item_id=item.shopping_item_id,
+        canonical_name=item.canonical_name,
+        status="bought",
+    )
+    db.add(event)
+    db.commit()
+
+    assert event.confirmation_source == "checklist_cross_off"
+    assert event.confidence == 1.0
+
+    db.add(
+        ShoppingConfirmationEvent(
+            shopping_item_id=item.shopping_item_id,
+            canonical_name=item.canonical_name,
+            status="bought",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()

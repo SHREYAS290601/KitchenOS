@@ -50,10 +50,26 @@ def upgrade() -> None:
     schema='pantryops'
     )
     op.create_index(op.f('ix_pantryops_shopping_item_shopping_list_id'), 'shopping_item', ['shopping_list_id'], unique=False, schema='pantryops')
+    op.create_table('shopping_confirmation_event',
+    sa.Column('event_id', sa.Uuid(), nullable=False),
+    sa.Column('shopping_item_id', sa.Uuid(), nullable=False),
+    sa.Column('canonical_name', sa.String(), nullable=False),
+    sa.Column('status', sa.String(), nullable=False),
+    sa.Column('confirmation_source', sa.String(), nullable=False),
+    sa.Column('confidence', sa.Float(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint("confirmation_source = 'checklist_cross_off'", name='ck_confirmation_source_cross_off'),
+    sa.CheckConstraint('confidence = 1.0', name='ck_confirmation_confidence_full'),
+    sa.ForeignKeyConstraint(['shopping_item_id'], ['pantryops.shopping_item.shopping_item_id'], ),
+    sa.PrimaryKeyConstraint('event_id'),
+    sa.UniqueConstraint('shopping_item_id'),
+    schema='pantryops'
+    )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_table('shopping_confirmation_event', schema='pantryops')
     op.drop_index(op.f('ix_pantryops_shopping_item_shopping_list_id'), table_name='shopping_item', schema='pantryops')
     op.drop_table('shopping_item', schema='pantryops')
     op.drop_index(op.f('ix_pantryops_shopping_list_user_id'), table_name='shopping_list', schema='pantryops')
