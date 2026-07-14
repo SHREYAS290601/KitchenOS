@@ -52,11 +52,12 @@ def confirm(
     db: Session = Depends(get_db),
 ) -> dict:
     try:
-        event = confirm_item(db, list_id, item_id)
+        result = confirm_item(db, list_id, item_id)
     except ItemNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except AlreadyConfirmed as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    event = result.event
     return {
         "event": {
             "event_id": str(event.event_id),
@@ -66,4 +67,5 @@ def confirm(
             "confirmation_source": event.confirmation_source,
             "confidence": event.confidence,
         },
+        "pantry_item_id": str(result.pantry_item.pantry_item_id),
     }
