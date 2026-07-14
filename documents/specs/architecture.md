@@ -143,6 +143,7 @@ user_edited / user_confirmed   (highest)
 > silent_check_in
 > api_enrichment
 > web_enrichment
+> checklist_default            (fresh-purchase default guess — Manifest §14.1; any observation overwrites it)
 > llm_inference                (never a truth source)
 ```
 

@@ -26,6 +26,7 @@ class EvidenceSource(StrEnum):
     silent_check_in = "silent_check_in"
     api_enrichment = "api_enrichment"
     web_enrichment = "web_enrichment"
+    checklist_default = "checklist_default"  # fresh-purchase default guess (Manifest §14.1)
     llm_inference = "llm_inference"   # never a truth source
     none = "none"                     # for status=unknown placeholders
 
