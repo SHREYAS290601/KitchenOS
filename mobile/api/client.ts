@@ -127,3 +127,84 @@ export async function getHealth(): Promise<ApiResult<Health>> {
   const data = (await response.json()) as Health;
   return { ok: true, data };
 }
+
+export type ConsentChoice = "session" | "always" | "answer_only";
+
+const CONSENT_PAYLOADS = {
+  session: { state: "granted_for_session", retention_policy: "delete_after_enrichment" },
+  always: { state: "always_granted", retention_policy: "keep_for_pantry_memory" },
+  answer_only: { state: "granted_for_single_image", retention_policy: "delete_after_answer" },
+} as const;
+
+export async function grantImageConsent(
+  choice: ConsentChoice,
+  shoppingSessionId: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    const response = await fetch(`${BASE_URL}/consent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...CONSENT_PAYLOADS[choice],
+        shopping_session_id: choice === "session" ? shoppingSessionId : null,
+      }),
+    });
+    if (!response.ok) {
+      const body = (await response.json()) as { detail?: string };
+      return { ok: false, message: body.detail ?? "Could not save image consent" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, message: "Could not reach the server to save image consent" };
+  }
+}
+
+export async function uploadAssistImage(
+  photoUri: string,
+  shoppingSessionId: string,
+  choice: ConsentChoice,
+): Promise<{ ok: true; imageId: string } | { ok: false; message: string }> {
+  const form = new FormData();
+  form.append("image", { uri: photoUri, name: "shopping-photo.jpg", type: "image/jpeg" } as unknown as Blob);
+  form.append("capture_context", "while_shopping_query");
+  form.append("shopping_session_id", shoppingSessionId);
+  form.append("retention_policy", CONSENT_PAYLOADS[choice].retention_policy);
+  try {
+    const response = await fetch(`${BASE_URL}/images`, { method: "POST", body: form });
+    const body = (await response.json()) as { image_id?: string; detail?: string };
+    if (!response.ok || !body.image_id) {
+      return { ok: false, message: body.detail ?? "Could not upload the image" };
+    }
+    return { ok: true, imageId: body.image_id };
+  } catch {
+    return { ok: false, message: "Could not reach the server to upload the image" };
+  }
+}
+
+export type AssistPayload = {
+  answer: string;
+  applied_preference_ids: string[];
+  audit: { verdict: "pass" | "block" | "needs_review"; reasons: string[] };
+  degraded: boolean;
+};
+
+export async function askShoppingAssistant(
+  question: string,
+  imageId?: string,
+  shoppingSessionId = "mobile-session",
+): Promise<{ ok: true; data: AssistPayload } | { ok: false; message: string }> {
+  try {
+    const response = await fetch(`${BASE_URL}/shopping/assist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, image_id: imageId, shopping_session_id: shoppingSessionId }),
+    });
+    const body = (await response.json()) as AssistPayload & { detail?: string };
+    if (!response.ok) {
+      return { ok: false, message: body.detail ?? "The shopping assistant could not answer" };
+    }
+    return { ok: true, data: body };
+  } catch {
+    return { ok: false, message: "Could not reach the shopping assistant" };
+  }
+}

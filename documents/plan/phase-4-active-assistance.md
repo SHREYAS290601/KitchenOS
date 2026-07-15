@@ -1,6 +1,6 @@
 # PantryOps Edge Phase 4: Active Assistance Implementation Plan
 
-> **For agentic workers:** Implement task-by-task with strict TDD: write the failing test, watch it fail, implement, watch it pass, commit. Steps use checkbox (`- [ ]`) syntax. REQUIRED ECC SKILLS before starting: `/ecc:agent-harness-construction` (Input Router + While-Shopping Assistant + Auditor as testable agents with typed tool boundaries), `/ecc:security-review` (consent enforcement; user text and images are untrusted input), `/ecc:error-handling` (LLM/tool failure paths degrade, never crash the answer), `/ecc:react-native-patterns` (camera + accessible consent UI).
+> **For agentic workers:** Implement task-by-task with strict TDD: write the failing test, watch it fail, implement, watch it pass, commit. Steps use checkbox (`- [x]`) syntax. REQUIRED ECC SKILLS before starting: `/ecc:agent-harness-construction` (Input Router + While-Shopping Assistant + Auditor as testable agents with typed tool boundaries), `/ecc:security-review` (consent enforcement; user text and images are untrusted input), `/ecc:error-handling` (LLM/tool failure paths degrade, never crash the answer), `/ecc:react-native-patterns` (camera + accessible consent UI).
 
 **Goal:** Handle the user's real-time requests — ad-hoc queries, while-shopping questions with optional photos, consent-gated image storage, the vague-usage quantity clarification flow — with Auditor v1 as the last gate on every answer.
 
@@ -66,13 +66,13 @@ mobile/
 - Create: `backend/app/storage/__init__.py`, `base.py`, `local.py`, `s3.py`
 - Test: `tests/test_storage.py`
 
-- [ ] **Step 1: Write the failing tests** — against both impls (local via `tmp_path`, MinIO marked `-m integration`): `put_image` returns an opaque URI; `open(uri)` round-trips bytes; `delete(uri)` then `open` raises `NotFound`; `get_uri` is stable. Backend selected from `Settings.storage_backend`.
+- [x] **Step 1: Write the failing tests** — against both impls (local via `tmp_path`, MinIO marked `-m integration`): `put_image` returns an opaque URI; `open(uri)` round-trips bytes; `delete(uri)` then `open` raises `NotFound`; `get_uri` is stable. Backend selected from `Settings.storage_backend`.
 
-- [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_storage.py -v` → FAIL.
+- [x] **Step 2: Run to verify they fail** — `uv run pytest tests/test_storage.py -v` → FAIL.
 
-- [ ] **Step 3: Implement** — `base.py` protocol; `local.py` under `data/user_uploads/` with UUID names; `s3.py` via boto3 against MinIO; factory in `__init__.py`.
+- [x] **Step 3: Implement** — `base.py` protocol; `local.py` under `data/user_uploads/` with UUID names; `s3.py` via boto3 against MinIO; factory in `__init__.py`.
 
-- [ ] **Step 4: Run to verify they pass. Commit** — `feat(storage): object-store abstraction with local and s3 backends`
+- [x] **Step 4: Run to verify they pass. Commit** — `feat(storage): object-store abstraction with local and s3 backends`
 
 ---
 
@@ -82,7 +82,7 @@ mobile/
 - Create: `backend/app/models/consent.py`, `backend/app/services/consent.py`, `backend/app/schemas/consent.py`, migration
 - Test: `tests/test_consent.py`
 
-- [ ] **Step 1: Write the failing tests** — the Manifest §8 state machine:
+- [x] **Step 1: Write the failing tests** — the Manifest §8 state machine:
 
 ```python
 def test_states_enumerated():          # not_requested, denied, granted_for_single_image,
@@ -96,11 +96,11 @@ def test_revoked_blocks_future_storage():
 def test_session_grant_scoped_to_session():   # other session id → refused
 ```
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — consent rows per user (+ optional session scope), `services/consent.py::check_can_store()` as the single authority; `grant/revoke` update rows, single-image grants consumed atomically.
+- [x] **Step 3: Implement** — consent rows per user (+ optional session scope), `services/consent.py::check_can_store()` as the single authority; `grant/revoke` update rows, single-image grants consumed atomically.
 
-- [ ] **Step 4: Run to verify they pass. Commit** — `feat(consent): consent state machine with storage authority`
+- [x] **Step 4: Run to verify they pass. Commit** — `feat(consent): consent state machine with storage authority`
 
 ---
 
@@ -110,7 +110,7 @@ def test_session_grant_scoped_to_session():   # other session id → refused
 - Create: `backend/app/models/image_evidence.py`, `backend/app/services/image_storage.py`, `backend/app/routes/images.py` (extend migration)
 - Test: `tests/test_image_storage.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_upload_with_consent_stores_and_records():
@@ -125,11 +125,11 @@ def test_retention_policy_recorded_from_user_choice():
     # keep_until_manually_deleted
 ```
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — `image_storage.py` asks `consent.check_can_store()` BEFORE touching the object store; record per `data-models.md` §4.5; 403 detail explains how to grant consent.
+- [x] **Step 3: Implement** — `image_storage.py` asks `consent.check_can_store()` BEFORE touching the object store; record per `data-models.md` §4.5; 403 detail explains how to grant consent.
 
-- [ ] **Step 4: Run to verify they pass. Commit** — `feat(images): consent-gated upload with evidence records`
+- [x] **Step 4: Run to verify they pass. Commit** — `feat(images): consent-gated upload with evidence records`
 
 ---
 
@@ -139,7 +139,7 @@ def test_retention_policy_recorded_from_user_choice():
 - Create: `backend/app/agents/llm.py`, `backend/app/agents/input_router.py`
 - Test: `tests/test_input_router.py`
 
-- [ ] **Step 1: Write the failing tests** — with the fake LLM:
+- [x] **Step 1: Write the failing tests** — with the fake LLM:
 
 ```python
 def test_routes_shopping_question_to_assistant():   # "Should I buy this yogurt?" + image
@@ -151,11 +151,11 @@ def test_router_never_writes():                     # ledger boundary guard stil
                                                     # router has no session dependency at all
 ```
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — `llm.py`: `LLMClient` protocol with `complete_structured(prompt, schema) -> BaseModel`, a real impl and `FakeLLM` (canned responses keyed by marker). `input_router.py`: intent classification via structured output, fallback keyword rules when the LLM call fails (`ecc:error-handling` — degraded, not dead). No DB session in its signature (Manifest §15.1 forbidden actions, structurally).
+- [x] **Step 3: Implement** — `llm.py`: `LLMClient` protocol with `complete_structured(prompt, schema) -> BaseModel`, a real impl and `FakeLLM` (canned responses keyed by marker). `input_router.py`: intent classification via structured output, fallback keyword rules when the LLM call fails (`ecc:error-handling` — degraded, not dead). No DB session in its signature (Manifest §15.1 forbidden actions, structurally).
 
-- [ ] **Step 4: Run to verify they pass. Commit** — `feat(agents): llm interface and input router with typed intents`
+- [x] **Step 4: Run to verify they pass. Commit** — `feat(agents): llm interface and input router with typed intents`
 
 ---
 
@@ -165,7 +165,7 @@ def test_router_never_writes():                     # ledger boundary guard stil
 - Create: `backend/app/agents/while_shopping_assistant.py`, `backend/app/schemas/assist.py`, `backend/app/routes/assist.py`
 - Test: `tests/test_assist_api.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_assist_answers_from_preferences_and_ledger():
@@ -183,11 +183,11 @@ def test_assist_with_photo_stores_only_with_consent():
 def test_assist_survives_llm_failure():   # LLM raises → 200 with fallback message, not 500
 ```
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — agent gathers context (list, ledger read-only, preferences, optional image record), calls the LLM for a structured answer, pipes through the Auditor (Task 7), returns advice + applied-preference ids. Route per `api-spec.md`.
+- [x] **Step 3: Implement** — agent gathers context (list, ledger read-only, preferences, optional image record), calls the LLM for a structured answer, pipes through the Auditor (Task 7), returns advice + applied-preference ids. Route per `api-spec.md`.
 
-- [ ] **Step 4: Run to verify they pass. Commit** — `feat(assist): while-shopping assistant with auditor-gated answers`
+- [x] **Step 4: Run to verify they pass. Commit** — `feat(assist): while-shopping assistant with auditor-gated answers`
 
 ---
 
@@ -197,13 +197,13 @@ def test_assist_survives_llm_failure():   # LLM raises → 200 with fallback mes
 - Create: `backend/app/agents/consumption_update.py`, `backend/app/routes/consumption.py`
 - Test: `tests/test_consumption_flow.py`
 
-- [ ] **Step 1: Write the failing tests** — Manifest §6.4/§15.14: vague liquid ("used a lot of milk") → clarification with exactly `[Full] [3/4] [1/2] [1/4] [Empty]`; vague bulk (rice) → same buckets; vague countable (tomatoes) → "how many are left?" count question; explicit reply (`new_quantity_value: "1/2"`) → applied via `apply_update()` as `user_confirmed`; **no quantity change ever occurs on the vague message itself**; unknown item name → clarification asking which item, not a guess.
+- [x] **Step 1: Write the failing tests** — Manifest §6.4/§15.14: vague liquid ("used a lot of milk") → clarification with exactly `[Full] [3/4] [1/2] [1/4] [Empty]`; vague bulk (rice) → same buckets; vague countable (tomatoes) → "how many are left?" count question; explicit reply (`new_quantity_value: "1/2"`) → applied via `apply_update()` as `user_confirmed`; **no quantity change ever occurs on the vague message itself**; unknown item name → clarification asking which item, not a guess.
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — agent resolves the item, branches the question on `quantity_type` (buckets vs count — from Phase 2 vocabulary), returns a structured clarification; the explicit-reply path is the only one that touches the ledger.
+- [x] **Step 3: Implement** — agent resolves the item, branches the question on `quantity_type` (buckets vs count — from Phase 2 vocabulary), returns a structured clarification; the explicit-reply path is the only one that touches the ledger.
 
-- [ ] **Step 4: Run to verify they pass. Commit** — `feat(consumption): ask-don't-guess quantity clarification flow`
+- [x] **Step 4: Run to verify they pass. Commit** — `feat(consumption): ask-don't-guess quantity clarification flow`
 
 ---
 
@@ -214,7 +214,7 @@ def test_assist_survives_llm_failure():   # LLM raises → 200 with fallback mes
 - Modify: `backend/app/routes/assist.py` (already wired in Task 5 — this task hardens it)
 - Test: `tests/test_auditor.py`
 
-- [ ] **Step 1: Write the failing tests** — deterministic rule checks (no LLM):
+- [x] **Step 1: Write the failing tests** — deterministic rule checks (no LLM):
 
 ```python
 def test_blocks_processing_without_consent():      # proposal touching a non-consented image
@@ -225,11 +225,11 @@ def test_pass_through_annotates_nothing_on_clean_output():
 def test_verdicts_are_structured():                # AuditVerdict: pass | block | needs_review + reasons
 ```
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — pure functions over the structured answer + its evidence context; extensible check registry (Phases 7–9 add checks: unsourced enrichment, recipe availability, preference overgeneralization). Every user-facing agent response passes through `auditor.review()` before serialization.
+- [x] **Step 3: Implement** — pure functions over the structured answer + its evidence context; extensible check registry (Phases 7–9 add checks: unsourced enrichment, recipe availability, preference overgeneralization). Every user-facing agent response passes through `auditor.review()` before serialization.
 
-- [ ] **Step 4: Run to verify they pass. Commit** — `feat(auditor): deterministic v1 gate on assist outputs`
+- [x] **Step 4: Run to verify they pass. Commit** — `feat(auditor): deterministic v1 gate on assist outputs`
 
 ---
 
@@ -239,11 +239,11 @@ def test_verdicts_are_structured():                # AuditVerdict: pass | block 
 - Modify: `backend/app/services/image_storage.py`, `backend/app/agents/while_shopping_assistant.py`
 - Test: append to `tests/test_image_storage.py`
 
-- [ ] **Step 1: Write the failing test** — a consented photo uploaded during an assist query gets `capture_context="while_shopping_query"`, `stored_for_future_enrichment=True`, `related_item_candidate` from the router intent, and `linked_shopping_session_id`; consent scope is snapshotted on the record (Phase 5 reads this — it never re-derives consent).
+- [x] **Step 1: Write the failing test** — a consented photo uploaded during an assist query gets `capture_context="while_shopping_query"`, `stored_for_future_enrichment=True`, `related_item_candidate` from the router intent, and `linked_shopping_session_id`; consent scope is snapshotted on the record (Phase 5 reads this — it never re-derives consent).
 
-- [ ] **Step 2: Verify fail → implement → verify pass.**
+- [x] **Step 2: Verify fail → implement → verify pass.**
 
-- [ ] **Step 3: Commit** — `feat(images): active photos linked for future background enrichment`
+- [x] **Step 3: Commit** — `feat(images): active photos linked for future background enrichment`
 
 ---
 
@@ -253,7 +253,7 @@ def test_verdicts_are_structured():                # AuditVerdict: pass | block 
 - Create: `mobile/screens/ConsentPrompt.tsx`, `mobile/camera/CaptureScreen.tsx`, `mobile/screens/AssistScreen.tsx`
 - Test: `mobile/__tests__/ConsentPrompt.test.tsx`, `mobile/__tests__/AssistScreen.test.tsx`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```tsx
 // ConsentPrompt: the three §8 choices as a radiogroup — each option
@@ -265,11 +265,11 @@ def test_verdicts_are_structured():                # AuditVerdict: pass | block 
 // attached-photo state shows a labeled thumbnail with a remove button
 ```
 
-- [ ] **Step 2: Run to verify they fail** — `npx jest mobile/__tests__ -t Consent` → FAIL.
+- [x] **Step 2: Run to verify they fail** — `npx jest mobile/__tests__ -t Consent` → FAIL.
 
-- [ ] **Step 3: Implement** — `ConsentPrompt` fires before the FIRST photo action and whenever consent is `not_requested`/`revoked`; choice posts to the consent endpoint and is cached. `CaptureScreen` wraps expo-camera with a labeled shutter button and photo-review step. `AssistScreen` renders the chat flow, calls `/shopping/assist`, shows applied-preference context ("Avoiding brand X — you disliked it") as plain text.
+- [x] **Step 3: Implement** — `ConsentPrompt` fires before the FIRST photo action and whenever consent is `not_requested`/`revoked`; choice posts to the consent endpoint and is cached. `CaptureScreen` wraps expo-camera with a labeled shutter button and photo-review step. `AssistScreen` renders the chat flow, calls `/shopping/assist`, shows applied-preference context ("Avoiding brand X — you disliked it") as plain text.
 
-- [ ] **Step 4: Run to verify they pass. Commit** — `feat(mobile): accessible consent, capture, and assist screens`
+- [x] **Step 4: Run to verify they pass. Commit** — `feat(mobile): accessible consent, capture, and assist screens`
 
 ---
 
