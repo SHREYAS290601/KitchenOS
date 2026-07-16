@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { Link } from "expo-router";
 
 import { getHealth } from "../api/client";
 
@@ -29,6 +30,9 @@ export default function HomeScreen() {
         Backend: {backend}
       </Text>
       <View style={styles.sections}>
+        <Link href="/assist" style={styles.assistLink} accessibilityRole="link">
+          Open the working shopping assistant
+        </Link>
         {SECTIONS.map((section) => (
           <View key={section} style={styles.sectionStub}>
             <Text accessibilityRole="header" style={styles.sectionTitle}>
@@ -55,4 +59,5 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 18, fontWeight: "600" },
   sectionBody: { fontSize: 14, color: "#4B5563" },
+  assistLink: { padding: 14, borderRadius: 8, backgroundColor: "#0F766E", color: "white", fontWeight: "700", textAlign: "center" },
 });

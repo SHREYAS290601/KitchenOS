@@ -11,6 +11,8 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "alembic>=1.13",
     "redis>=5",
+    "boto3>=1.43.49",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]

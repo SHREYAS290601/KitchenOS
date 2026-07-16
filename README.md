@@ -59,4 +59,21 @@ The one rule that governs everything:
 
 ## Quickstart
 
-There is no runnable code yet. Implementation starts with [Phase 1 — Mobile Shell and Backend](documents/plan/phase-1-mobile-shell-and-backend.md), which scaffolds the FastAPI backend, Expo mobile shell, and the Postgres/Redis/MinIO docker compose stack. Once Phase 1 lands, this section will hold the real setup commands (`docker compose up -d`, `uv run pytest`, `npx expo start`).
+Phases 1–4 are implemented: the FastAPI backend, pantry ledger, shopping checklist, consent-gated images, while-shopping assistant, ask-don't-guess consumption updates, and the accessible Expo flow are runnable.
+
+```bash
+docker compose up -d
+uv run alembic upgrade head
+PANTRYOPS_DATABASE_URL=postgresql+psycopg://pantryops:pantryops@localhost:5432/pantryops \
+PANTRYOPS_REDIS_URL=redis://localhost:6379/0 \
+uv run uvicorn backend.app.main:create_app --factory --reload
+```
+
+In another terminal:
+
+```bash
+cd mobile
+EXPO_PUBLIC_API_URL=http://127.0.0.1:8000 npm start
+```
+
+For a browser preview, run `npm run web -- --port 8081` and open `http://localhost:8081/assist`. Unit and integration checks are `uv run pytest` and `cd mobile && npm test -- --runInBand`.
