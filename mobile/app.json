@@ -1,13 +1,14 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "KitchenOS",
+    "slug": "kitchenos",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ssk16devs.kitchenos"
     },
     "android": {
       "adaptiveIcon": {
@@ -16,7 +17,10 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -30,8 +34,22 @@
           "recordAudioAndroid": false,
           "barcodeScannerEnabled": false
         }
-      ]
+      ],
+      "expo-status-bar"
     ],
-    "scheme": "pantryops"
+    "scheme": "pantryops",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0581bbfe-41eb-4379-bad7-5d100e020d4e"
+      }
+    },
+    "owner": "ssk16devs-team",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/0581bbfe-41eb-4379-bad7-5d100e020d4e"
+    }
   }
 }

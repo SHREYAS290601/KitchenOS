@@ -1,3 +1,5 @@
+import { File, UploadType } from "expo-file-system";
+
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export type Health = { status: string; service: string };
@@ -164,19 +166,31 @@ export async function uploadAssistImage(
   shoppingSessionId: string,
   choice: ConsentChoice,
 ): Promise<{ ok: true; imageId: string } | { ok: false; message: string }> {
-  const form = new FormData();
-  form.append("image", { uri: photoUri, name: "shopping-photo.jpg", type: "image/jpeg" } as unknown as Blob);
-  form.append("capture_context", "while_shopping_query");
-  form.append("shopping_session_id", shoppingSessionId);
-  form.append("retention_policy", CONSENT_PAYLOADS[choice].retention_policy);
   try {
-    const response = await fetch(`${BASE_URL}/images`, { method: "POST", body: form });
-    const body = (await response.json()) as { image_id?: string; detail?: string };
-    if (!response.ok || !body.image_id) {
+    const photo = new File(photoUri);
+    if (!photo.exists) {
+      return { ok: false, message: "The captured photo is no longer available. Please take it again." };
+    }
+
+    const response = await photo.upload(`${BASE_URL}/images`, {
+      httpMethod: "POST",
+      uploadType: UploadType.MULTIPART,
+      fieldName: "image",
+      mimeType: photo.type || "image/jpeg",
+      parameters: {
+        capture_context: "while_shopping_query",
+        shopping_session_id: shoppingSessionId,
+        retention_policy: CONSENT_PAYLOADS[choice].retention_policy,
+      },
+      sessionType: "foreground",
+    });
+    const body = JSON.parse(response.body) as { image_id?: string; detail?: string };
+    if (response.status < 200 || response.status >= 300 || !body.image_id) {
       return { ok: false, message: body.detail ?? "Could not upload the image" };
     }
     return { ok: true, imageId: body.image_id };
-  } catch {
+  } catch (error) {
+    console.warn("Image upload failed", error);
     return { ok: false, message: "Could not reach the server to upload the image" };
   }
 }
