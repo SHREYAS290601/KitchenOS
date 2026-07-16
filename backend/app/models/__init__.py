@@ -1,3 +1,4 @@
+from backend.app.models.background_job import BackgroundJob
 from backend.app.models.confirmation_event import ShoppingConfirmationEvent
 from backend.app.models.consent import ConsentRecord
 from backend.app.models.image_evidence import ImageEvidenceRecord
@@ -8,6 +9,7 @@ from backend.app.models.shopping_list import ShoppingList
 
 __all__ = [
     "LedgerChangeLog",
+    "BackgroundJob",
     "ConsentRecord",
     "ImageEvidenceRecord",
     "PantryItem",

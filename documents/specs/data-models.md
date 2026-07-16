@@ -271,6 +271,7 @@ Rules: strong preferences only after first use (before first use → `preference
     { "step": "segmentation",       "status": "queued" },
     { "step": "object_detection",   "status": "queued" },
     { "step": "ocr",                "status": "queued" },
+    { "step": "barcode",            "status": "queued" },
     { "step": "product_enrichment", "status": "queued" }
   ]
 }
