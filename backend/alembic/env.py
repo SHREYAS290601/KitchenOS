@@ -6,6 +6,7 @@ from sqlalchemy import pool
 
 from alembic import context
 
+import backend.app.models  # noqa: F401  (register tables on Base.metadata)
 from backend.app.db import Base
 
 config = context.config

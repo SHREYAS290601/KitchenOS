@@ -31,3 +31,9 @@ def db(engine):
         session.execute(table.delete())
     session.commit()
     session.close()
+
+
+@pytest.fixture
+def tables(engine):
+    Base.metadata.create_all(engine)
+    return engine
