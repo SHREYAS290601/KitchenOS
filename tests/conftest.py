@@ -21,6 +21,24 @@ def engine():
     eng.dispose()
 
 
+@pytest.fixture(autouse=True)
+def eager_celery():
+    from backend.app.workers.celery_app import celery
+
+    previous = {
+        "task_always_eager": celery.conf.task_always_eager,
+        "task_eager_propagates": celery.conf.task_eager_propagates,
+        "task_store_eager_result": celery.conf.task_store_eager_result,
+    }
+    celery.conf.update(
+        task_always_eager=True,
+        task_eager_propagates=True,
+        task_store_eager_result=False,
+    )
+    yield celery
+    celery.conf.update(**previous)
+
+
 @pytest.fixture
 def db(engine):
     session_factory = make_session_factory(engine)
