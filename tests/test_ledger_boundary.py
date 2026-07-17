@@ -77,3 +77,16 @@ def test_pantry_routes_import_apply_update_not_orm_helpers():
     assert "LedgerChangeLog" not in imported, (
         "routes/pantry.py must not touch the change log ORM model directly"
     )
+
+
+def test_agents_do_not_import_ledger_write_helpers():
+    violations = []
+    for path in (BACKEND_APP / "agents").glob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (
+                node.module == "backend.app.services.ledger"
+                or (node.module or "").startswith("backend.app.models")
+            ):
+                violations.append(path.name)
+    assert violations == []
