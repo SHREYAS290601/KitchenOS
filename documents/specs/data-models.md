@@ -167,6 +167,8 @@ Cross-off confirms **purchase only** — never brand, price, size, or nutrition.
   "consent_status": "granted_for_session",
   "retention_policy": "delete_after_enrichment",
   "stored_for_future_enrichment": true,
+  "retention_due_at": null,
+  "deleted_at": null,
   "created_at": "timestamp"
 }
 ```

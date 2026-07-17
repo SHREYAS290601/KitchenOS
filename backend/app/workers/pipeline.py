@@ -3,7 +3,10 @@ from datetime import datetime, timezone
 
 from celery import chain
 
+from backend.app.config import Settings
 from backend.app.models.background_job import BackgroundJob, JobStatus
+from backend.app.services.retention import enforce_retention_for_job, sweep_retention
+from backend.app.storage import make_object_store
 from backend.app.workers.celery_app import celery
 from backend.app.workers.steps import (
     barcode_step,
@@ -32,6 +35,19 @@ def finalize_check_in(job_id: str) -> dict[str, str]:
         return {"job_id": job_id, "status": str(job.status)}
 
 
+@celery.task(name="pantryops.retention.sweep")
+def enforce_retention(job_id: str | None = None) -> dict[str, int]:
+    settings = Settings()
+    store = make_object_store(settings)
+    with worker_session() as session:
+        deleted = (
+            enforce_retention_for_job(session, store, uuid.UUID(job_id))
+            if job_id is not None
+            else sweep_retention(session, store)
+        )
+    return {"deleted": deleted}
+
+
 def build_check_in_pipeline(job_id: str):
     return chain(
         segmentation_step.si(job_id),
@@ -40,6 +56,7 @@ def build_check_in_pipeline(job_id: str):
         barcode_step.si(job_id),
         product_enrichment_step.si(job_id),
         finalize_check_in.si(job_id),
+        enforce_retention.si(job_id),
     )
 
 
@@ -60,3 +77,12 @@ def run_check_in_pipeline(job_id: str) -> dict[str, str]:
 
     result = build_check_in_pipeline(job_id).apply_async()
     return {"job_id": job_id, "workflow_id": result.id}
+
+
+celery.conf.beat_schedule = {
+    **(celery.conf.beat_schedule or {}),
+    "enforce-image-retention-hourly": {
+        "task": "pantryops.retention.sweep",
+        "schedule": 3600.0,
+    },
+}

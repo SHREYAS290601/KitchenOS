@@ -1,13 +1,17 @@
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.deps import get_current_user, get_db
 from backend.app.main import create_app
+from backend.app.models.background_job import BackgroundJob, JobStatus, initial_check_in_steps
 from backend.app.models.consent import ConsentRecord, ConsentState, RetentionPolicy
 from backend.app.models.image_evidence import ImageEvidenceRecord
+from backend.app.services.retention import enforce_retention_for_job, sweep_retention
+from backend.app.storage.local import LocalObjectStore, ObjectNotFound
 
 USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
@@ -125,3 +129,101 @@ def test_shared_worker_predicate_detects_revocation(db, tables):
     db.commit()
 
     assert consent_allows_processing(db, image) is False
+
+
+def add_retention_job(db, store, policy, *, status=JobStatus.completed):
+    user_id = uuid.uuid4()
+    image = ImageEvidenceRecord(
+        user_id=user_id,
+        capture_context="post_shopping_check_in",
+        processing_mode="silent_background_enrichment",
+        linked_shopping_session_id="session-001",
+        storage_uri=store.put_image(b"photo", content_type="image/jpeg"),
+        consent_status=ConsentState.always_granted,
+        retention_policy=policy,
+        stored_for_future_enrichment=True,
+    )
+    db.add(image)
+    db.flush()
+    job = BackgroundJob(
+        status=status,
+        user_id=user_id,
+        image_ids=[str(image.image_id)],
+        steps=initial_check_in_steps(),
+    )
+    db.add(job)
+    db.commit()
+    return job, image
+
+
+def test_completed_job_deletes_enrichment_image_and_marks_row(db, tables, tmp_path):
+    store = LocalObjectStore(tmp_path)
+    job, image = add_retention_job(
+        db,
+        store,
+        RetentionPolicy.delete_after_enrichment,
+    )
+
+    assert enforce_retention_for_job(db, store, job.job_id) == 1
+    db.refresh(image)
+
+    assert image.deleted_at is not None
+    with pytest.raises(ObjectNotFound):
+        store.open(image.storage_uri)
+
+
+def test_incomplete_job_does_not_delete_enrichment_image(db, tables, tmp_path):
+    store = LocalObjectStore(tmp_path)
+    job, image = add_retention_job(
+        db,
+        store,
+        RetentionPolicy.delete_after_enrichment,
+        status=JobStatus.processing,
+    )
+
+    assert enforce_retention_for_job(db, store, job.job_id) == 0
+    db.refresh(image)
+    assert image.deleted_at is None
+    assert store.open(image.storage_uri) == b"photo"
+
+
+def test_keep_for_pantry_memory_survives_retention(db, tables, tmp_path):
+    store = LocalObjectStore(tmp_path)
+    job, image = add_retention_job(
+        db,
+        store,
+        RetentionPolicy.keep_for_pantry_memory,
+    )
+
+    assert enforce_retention_for_job(db, store, job.job_id) == 0
+    assert store.open(image.storage_uri) == b"photo"
+
+
+def test_due_delete_after_answer_image_is_swept_idempotently(db, tables, tmp_path):
+    store = LocalObjectStore(tmp_path)
+    user_id = uuid.uuid4()
+    image = ImageEvidenceRecord(
+        user_id=user_id,
+        capture_context="while_shopping_query",
+        processing_mode="active_then_background_enrichment",
+        storage_uri="local://already-missing.jpg",
+        consent_status=ConsentState.granted_for_single_image,
+        retention_policy=RetentionPolicy.delete_after_answer,
+        stored_for_future_enrichment=False,
+        retention_due_at=datetime.now(timezone.utc),
+    )
+    db.add(image)
+    db.commit()
+
+    assert sweep_retention(db, store) == 1
+    db.refresh(image)
+    assert image.deleted_at is not None
+    assert sweep_retention(db, store) == 0
+
+
+def test_retention_task_is_registered_with_celery_beat():
+    from backend.app.workers.celery_app import celery
+    from backend.app.workers import pipeline  # noqa: F401
+
+    schedule = celery.conf.beat_schedule["enforce-image-retention-hourly"]
+    assert schedule["task"] == "pantryops.retention.sweep"

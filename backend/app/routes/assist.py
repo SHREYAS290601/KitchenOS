@@ -5,10 +5,11 @@ from sqlalchemy.orm import Session
 from backend.app.agents.llm import get_llm_client
 from backend.app.agents.while_shopping_assistant import AssistContext, WhileShoppingAssistantAgent
 from backend.app.deps import get_db
-from backend.app.models.consent import ConsentState
+from backend.app.models.consent import ConsentState, RetentionPolicy
 from backend.app.models.image_evidence import ImageEvidenceRecord
 from backend.app.models.pantry_item import PantryItem
 from backend.app.schemas.assist import AssistRequest, AssistResponse
+from backend.app.services.retention import mark_retention_due
 
 router = APIRouter(prefix="/shopping/assist", tags=["assist"])
 
@@ -39,6 +40,8 @@ def assist(payload: AssistRequest, db: Session = Depends(get_db)) -> AssistRespo
             has_identity_evidence=False,
         )
     )
+    if image and image.retention_policy == RetentionPolicy.delete_after_answer:
+        mark_retention_due(db, image)
     return AssistResponse(
         **result.model_dump(),
         image_id=image.image_id if image else None,
