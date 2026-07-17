@@ -193,3 +193,45 @@ def test_job_status_reads_durable_steps_and_is_user_scoped(client, db, monkeypat
     job.user_id = OTHER_USER_ID
     db.commit()
     assert client.get(f"/jobs/{job.job_id}").status_code == 404
+
+
+def test_mobile_check_in_agent_refuses_zero_images():
+    from backend.app.agents.mobile_check_in import (
+        MobileCheckInAgent,
+        MobileCheckInContext,
+    )
+
+    agent = MobileCheckInAgent(lambda _context: uuid.uuid4())
+
+    with pytest.raises(ValueError, match="user-provided images"):
+        agent.run(
+            MobileCheckInContext(
+                user_id=USER_ID,
+                shopping_session_id="session-001",
+                image_ids=[],
+            )
+        )
+
+
+def test_mobile_check_in_agent_returns_background_status_without_identity_claims():
+    from backend.app.agents.mobile_check_in import (
+        MobileCheckInAgent,
+        MobileCheckInContext,
+        MobileCheckInProposal,
+    )
+
+    expected_job_id = uuid.uuid4()
+    context = MobileCheckInContext(
+        user_id=USER_ID,
+        shopping_session_id="session-001",
+        image_ids=[uuid.uuid4()],
+    )
+
+    result = MobileCheckInAgent(lambda received: expected_job_id).run(context)
+
+    assert result == MobileCheckInProposal(
+        job_id=expected_job_id,
+        status="processing_in_background",
+    )
+    assert "brand" not in MobileCheckInProposal.model_fields
+    assert "product_name" not in MobileCheckInProposal.model_fields
