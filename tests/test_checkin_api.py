@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from backend.app.deps import get_current_user, get_db
 from backend.app.main import create_app
 from backend.app.models.background_job import BackgroundJob
-from backend.app.models.consent import ConsentState, RetentionPolicy
+from backend.app.models.consent import ConsentRecord, ConsentState, RetentionPolicy
 from backend.app.models.image_evidence import ImageEvidenceRecord
 
 USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -40,6 +40,20 @@ def add_image(
     session_id="session-001",
     consent_status=ConsentState.granted_for_session,
 ):
+    consent = db.query(ConsentRecord).filter_by(user_id=user_id).one_or_none()
+    if consent is None:
+        db.add(
+            ConsentRecord(
+                user_id=user_id,
+                state=consent_status,
+                session_id=(
+                    session_id
+                    if consent_status == ConsentState.granted_for_session
+                    else None
+                ),
+                retention_policy=RetentionPolicy.delete_after_enrichment,
+            )
+        )
     image = ImageEvidenceRecord(
         user_id=user_id,
         capture_context="post_shopping_check_in",

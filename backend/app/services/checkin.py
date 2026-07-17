@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.models.background_job import BackgroundJob, JobStatus, initial_check_in_steps
+from backend.app.models.consent import ConsentRecord, ConsentState
 from backend.app.models.image_evidence import ImageEvidenceRecord
 from backend.app.schemas.checkin import CheckInRequest
 
@@ -19,6 +20,46 @@ class CheckInImagesNotFound(LookupError):
 
 class InvalidCheckInImages(ValueError):
     pass
+
+
+class CheckInConsentRequired(PermissionError):
+    def __init__(self, image_id: uuid.UUID):
+        self.image_id = image_id
+        super().__init__(f"image {image_id} is not consented for silent processing")
+
+
+_SILENT_CONSENT_STATES = {
+    ConsentState.granted_for_session,
+    ConsentState.always_granted,
+}
+
+
+def consent_allows_processing(db: Session, image: ImageEvidenceRecord) -> bool:
+    """Check both the upload-time snapshot and current revocable consent."""
+    try:
+        image_state = ConsentState(image.consent_status)
+    except ValueError:
+        return False
+    if image_state not in _SILENT_CONSENT_STATES:
+        return False
+
+    current = db.scalar(
+        select(ConsentRecord).where(ConsentRecord.user_id == image.user_id)
+    )
+    if current is None:
+        return False
+    try:
+        current_state = ConsentState(current.state)
+    except ValueError:
+        return False
+    if current_state not in _SILENT_CONSENT_STATES:
+        return False
+    if current_state == ConsentState.granted_for_session:
+        return bool(
+            current.session_id
+            and current.session_id == image.linked_shopping_session_id
+        )
+    return True
 
 
 def _load_owned_images(
@@ -59,6 +100,10 @@ def create_check_in(
         raise InvalidCheckInImages(
             "all images must be post-shopping uploads linked to this shopping session"
         )
+
+    for image in images:
+        if not consent_allows_processing(db, image):
+            raise CheckInConsentRequired(image.image_id)
 
     job = BackgroundJob(
         job_type="grocery_image_check_in",

@@ -9,6 +9,7 @@ from backend.app.models.background_job import BackgroundJob
 from backend.app.schemas.checkin import CheckInRequest, CheckInResponse, JobStatusOut
 from backend.app.services.checkin import (
     CheckInImagesNotFound,
+    CheckInConsentRequired,
     InvalidCheckInImages,
     create_check_in,
     dispatch_background_job,
@@ -33,6 +34,9 @@ def post_grocery_check_in(
     except InvalidCheckInImages as exc:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CheckInConsentRequired as exc:
+        db.rollback()
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception:
         db.rollback()
         raise

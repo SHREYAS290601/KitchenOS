@@ -160,7 +160,7 @@ def test_job_status_endpoint_returns_steps(client, db, queued_job):
 
 - [ ] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — `services/checkin.py` asserts `consent_status ∈ {granted_for_single_image, granted_for_session, always_granted}` per image (invariant 4); the same predicate is exported as `consent_allows_processing(image)` for the worker.
+- [ ] **Step 3: Implement** — `services/checkin.py` asserts `consent_status ∈ {granted_for_session, always_granted}` per image (invariant 4); the same predicate is exported as `consent_allows_processing(image)` for the worker. Single-image consent remains active-answer-only and never authorizes silent enrichment.
 
 - [ ] **Step 4: Run to verify they pass.**
 
