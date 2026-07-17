@@ -222,3 +222,105 @@ export async function askShoppingAssistant(
     return { ok: false, message: "Could not reach the shopping assistant" };
   }
 }
+
+export type CheckInStep = { step: string; status: string };
+export type CheckInJob = {
+  jobId: string;
+  status: "queued" | "processing" | "completed" | "failed" | "needs_review";
+  steps: CheckInStep[];
+};
+export type CheckInResult =
+  | { ok: true; data: CheckInJob }
+  | { ok: false; message: string };
+
+function mapCheckInJob(body: {
+  job_id: string;
+  status: CheckInJob["status"];
+  steps: CheckInStep[];
+}): CheckInJob {
+  return { jobId: body.job_id, status: body.status, steps: [...body.steps] };
+}
+
+export async function uploadCheckInImage(
+  photoUri: string,
+  shoppingSessionId: string,
+): Promise<{ ok: true; imageId: string } | { ok: false; message: string }> {
+  try {
+    const photo = new File(photoUri);
+    if (!photo.exists) {
+      return { ok: false, message: "A selected grocery photo is no longer available" };
+    }
+    const response = await photo.upload(`${BASE_URL}/images`, {
+      httpMethod: "POST",
+      uploadType: UploadType.MULTIPART,
+      fieldName: "image",
+      mimeType: photo.type || "image/jpeg",
+      parameters: {
+        capture_context: "post_shopping_check_in",
+        shopping_session_id: shoppingSessionId,
+        retention_policy: "delete_after_enrichment",
+      },
+      sessionType: "foreground",
+    });
+    const body = JSON.parse(response.body) as { image_id?: string; detail?: string };
+    if (response.status < 200 || response.status >= 300 || !body.image_id) {
+      return { ok: false, message: body.detail ?? "Could not upload a grocery photo" };
+    }
+    return { ok: true, imageId: body.image_id };
+  } catch {
+    return { ok: false, message: "Could not reach the server to upload grocery photos" };
+  }
+}
+
+export async function postCheckIn(
+  imageIds: string[],
+  shoppingSessionId: string,
+): Promise<CheckInResult> {
+  try {
+    const response = await fetch(`${BASE_URL}/check-in/groceries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        shopping_session_id: shoppingSessionId,
+        image_ids: [...imageIds],
+        processing_mode: "silent_background_enrichment",
+      }),
+    });
+    const body = (await response.json()) as {
+      job_id?: string;
+      status?: CheckInJob["status"];
+      steps?: CheckInStep[];
+      detail?: string;
+    };
+    if (!response.ok || !body.job_id || !body.status || !body.steps) {
+      return { ok: false, message: body.detail ?? "Could not start grocery check-in" };
+    }
+    return {
+      ok: true,
+      data: mapCheckInJob({ job_id: body.job_id, status: body.status, steps: body.steps }),
+    };
+  } catch {
+    return { ok: false, message: "Could not reach the server to start grocery check-in" };
+  }
+}
+
+export async function getJobStatus(jobId: string): Promise<CheckInResult> {
+  try {
+    const response = await fetch(`${BASE_URL}/jobs/${jobId}`);
+    const body = (await response.json()) as {
+      job_id?: string;
+      status?: CheckInJob["status"];
+      steps?: CheckInStep[];
+      detail?: string;
+    };
+    if (!response.ok || !body.job_id || !body.status || !body.steps) {
+      return { ok: false, message: body.detail ?? "Could not refresh check-in status" };
+    }
+    return {
+      ok: true,
+      data: mapCheckInJob({ job_id: body.job_id, status: body.status, steps: body.steps }),
+    };
+  } catch {
+    return { ok: false, message: "Could not reach the server for check-in status" };
+  }
+}

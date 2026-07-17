@@ -4,7 +4,7 @@ import { Link } from "expo-router";
 
 import { getHealth } from "../api/client";
 
-const SECTIONS = ["Checklist", "Pantry", "Assist", "Check-in", "Settings"] as const;
+const SECTIONS = ["Checklist", "Pantry", "Assist", "Settings"] as const;
 
 type Reachability = "checking" | "reachable" | "unreachable";
 
@@ -32,6 +32,9 @@ export default function HomeScreen() {
       <View style={styles.sections}>
         <Link href="/assist" style={styles.assistLink} accessibilityRole="link">
           Open the working shopping assistant
+        </Link>
+        <Link href="/check-in" style={styles.assistLink} accessibilityRole="link">
+          Check in groceries with photos
         </Link>
         {SECTIONS.map((section) => (
           <View key={section} style={styles.sectionStub}>
