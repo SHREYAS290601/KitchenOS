@@ -59,12 +59,13 @@ def _frequent_items(db: Session, user_id: uuid.UUID) -> list[FrequentItem]:
 def create_shopping_list(
     db: Session,
     payload: ShoppingListCreate,
+    user_id: uuid.UUID,
     preference_rules: list[PreferenceRule] | None = None,
 ) -> ShoppingList:
     context = PlannerContext(
         goal=payload.goal,
-        pantry=_pantry_views(db, payload.user_id),
-        frequent_items=_frequent_items(db, payload.user_id),
+        pantry=_pantry_views(db, user_id),
+        frequent_items=_frequent_items(db, user_id),
         cuisine_preferences=payload.cuisine_preferences,
         dietary_restrictions=payload.dietary_restrictions,
         protein_goal=payload.protein_goal,
@@ -73,7 +74,7 @@ def create_shopping_list(
     )
     proposal = ShoppingPlannerAgent().run(context)
 
-    shopping_list = ShoppingList(user_id=payload.user_id, goal=payload.goal)
+    shopping_list = ShoppingList(user_id=user_id, goal=payload.goal)
     db.add(shopping_list)
     db.flush()
     for planned in proposal.items:

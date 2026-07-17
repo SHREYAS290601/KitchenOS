@@ -38,10 +38,12 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow KitchenOS to select only the grocery photos you choose for check-in"
+          "photosPermission": "Allow KitchenOS to select only the grocery photos you choose for check-in",
+          "microphonePermission": false
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-secure-store"
     ],
     "scheme": "pantryops",
     "extra": {

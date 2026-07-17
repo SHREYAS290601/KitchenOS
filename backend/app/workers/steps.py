@@ -1,9 +1,11 @@
+import logging
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.config import Settings
@@ -13,9 +15,13 @@ from backend.app.models.image_evidence import ImageEvidenceRecord
 from backend.app.services.checkin import consent_allows_processing
 from backend.app.workers.celery_app import celery
 
+logger = logging.getLogger(__name__)
 
 class ConsentRevokedError(PermissionError):
     pass
+
+
+_TRANSIENT_STEP_ERRORS = (SQLAlchemyError, ConnectionError, TimeoutError, OSError)
 
 
 @contextmanager
@@ -27,6 +33,36 @@ def worker_session() -> Iterator[Session]:
         yield session
     finally:
         session.close()
+        engine.dispose()
+
+
+@contextmanager
+def locked_step_session(job_id: uuid.UUID, step_name: str) -> Iterator[Session]:
+    """Serialize duplicate deliveries while allowing crash recovery.
+
+    PostgreSQL session-level advisory locks are released automatically if a
+    worker process loses its database connection.
+    """
+    settings = Settings()
+    engine = make_engine(settings.database_url)
+    connection = engine.connect()
+    session = Session(bind=connection, expire_on_commit=False)
+    lock_key = f"pantryops:{job_id}:{step_name}"
+    try:
+        session.execute(
+            text("SELECT pg_advisory_lock(hashtextextended(:key, 0))"),
+            {"key": lock_key},
+        )
+        yield session
+    finally:
+        session.rollback()
+        session.execute(
+            text("SELECT pg_advisory_unlock(hashtextextended(:key, 0))"),
+            {"key": lock_key},
+        )
+        session.commit()
+        session.close()
+        connection.close()
         engine.dispose()
 
 
@@ -63,14 +99,60 @@ def _result(job_id: uuid.UUID, step_name: str) -> dict:
     return {"job_id": str(job_id), "step": step_name, "candidates": []}
 
 
+def _log_step_failure(job_id: uuid.UUID, step_name: str, error: Exception) -> None:
+    logger.error(
+        "check-in step failed",
+        exc_info=(type(error), error, error.__traceback__),
+        extra={"job_id": str(job_id), "step": step_name},
+    )
+
+
+def _persist_failure(
+    session: Session,
+    job_id: uuid.UUID,
+    step_name: str,
+    error: Exception,
+) -> bool:
+    job = _load_job(session, job_id)
+    if (
+        _step_status(job, step_name) == StepStatus.completed
+        or job.status in {JobStatus.completed, JobStatus.failed, JobStatus.needs_review}
+    ):
+        return False
+    job.set_step_status(step_name, StepStatus.failed)
+    job.status = JobStatus.failed
+    job.error = (
+        "consent_revoked"
+        if isinstance(error, ConsentRevokedError)
+        else "processing_failed"
+    )
+    job.completed_at = datetime.now(timezone.utc)
+    session.commit()
+    return True
+
+
+def _enqueue_failure_retention(job_id: uuid.UUID) -> None:
+    try:
+        from backend.app.workers.pipeline import enforce_retention
+
+        enforce_retention.apply_async(
+            args=[str(job_id)],
+            task_id=f"retention-failure-{job_id}",
+        )
+    except Exception:
+        logger.exception(
+            "failed to enqueue immediate retention; beat will reconcile",
+            extra={"job_id": str(job_id)},
+        )
+
+
 def _mark_failed(job_id: uuid.UUID, step_name: str, error: Exception) -> None:
-    with worker_session() as session:
-        job = _load_job(session, job_id)
-        job.set_step_status(step_name, StepStatus.failed)
-        job.status = JobStatus.failed
-        job.error = str(error)[:500]
-        job.completed_at = datetime.now(timezone.utc)
-        session.commit()
+    """Conditionally fail a step while holding its duplicate-delivery lock."""
+    _log_step_failure(job_id, step_name, error)
+    with locked_step_session(job_id, step_name) as session:
+        changed = _persist_failure(session, job_id, step_name, error)
+    if changed:
+        _enqueue_failure_retention(job_id)
 
 
 def run_stub(step_name: str, job_id: uuid.UUID) -> dict:
@@ -80,10 +162,16 @@ def run_stub(step_name: str, job_id: uuid.UUID) -> dict:
 
 def execute_job_step(job_id: str, step_name: str) -> dict:
     resolved_job_id = uuid.UUID(job_id)
-    try:
-        with worker_session() as session:
+    with locked_step_session(resolved_job_id, step_name) as session:
+        try:
             job = _load_job(session, resolved_job_id)
             if _step_status(job, step_name) == StepStatus.completed:
+                return _result(resolved_job_id, step_name)
+            if job.status in {
+                JobStatus.completed,
+                JobStatus.failed,
+                JobStatus.needs_review,
+            }:
                 return _result(resolved_job_id, step_name)
             _assert_current_consent(session, job)
             job.status = JobStatus.processing
@@ -91,40 +179,60 @@ def execute_job_step(job_id: str, step_name: str) -> dict:
             job.set_step_status(step_name, StepStatus.processing)
             session.commit()
 
-        result = run_stub(step_name, resolved_job_id)
+            result = run_stub(step_name, resolved_job_id)
 
-        with worker_session() as session:
             job = _load_job(session, resolved_job_id)
             _assert_current_consent(session, job)
             job.set_step_status(step_name, StepStatus.completed)
             job.error = None
             session.commit()
-        return result
-    except Exception as exc:
-        _mark_failed(resolved_job_id, step_name, exc)
+            return result
+        except ConsentRevokedError as exc:
+            _log_step_failure(resolved_job_id, step_name, exc)
+            if _persist_failure(session, resolved_job_id, step_name, exc):
+                _enqueue_failure_retention(resolved_job_id)
+            raise
+        except _TRANSIENT_STEP_ERRORS:
+            raise
+        except Exception as exc:
+            _log_step_failure(resolved_job_id, step_name, exc)
+            if _persist_failure(session, resolved_job_id, step_name, exc):
+                _enqueue_failure_retention(resolved_job_id)
+            raise
+
+
+def _execute_with_retry(task, job_id: str, step_name: str) -> dict:
+    try:
+        return execute_job_step(job_id, step_name)
+    except ConsentRevokedError:
         raise
+    except _TRANSIENT_STEP_ERRORS as exc:
+        if task.request.retries >= task.max_retries:
+            _mark_failed(uuid.UUID(job_id), step_name, exc)
+            raise
+        raise task.retry(exc=exc, countdown=min(2 ** task.request.retries, 30))
 
 
-@celery.task(name="pantryops.checkin.segmentation")
-def segmentation_step(job_id: str) -> dict:
-    return execute_job_step(job_id, "segmentation")
+@celery.task(bind=True, max_retries=3, name="pantryops.checkin.segmentation")
+def segmentation_step(self, job_id: str) -> dict:
+    return _execute_with_retry(self, job_id, "segmentation")
 
 
-@celery.task(name="pantryops.checkin.object_detection")
-def object_detection_step(job_id: str) -> dict:
-    return execute_job_step(job_id, "object_detection")
+@celery.task(bind=True, max_retries=3, name="pantryops.checkin.object_detection")
+def object_detection_step(self, job_id: str) -> dict:
+    return _execute_with_retry(self, job_id, "object_detection")
 
 
-@celery.task(name="pantryops.checkin.ocr")
-def ocr_step(job_id: str) -> dict:
-    return execute_job_step(job_id, "ocr")
+@celery.task(bind=True, max_retries=3, name="pantryops.checkin.ocr")
+def ocr_step(self, job_id: str) -> dict:
+    return _execute_with_retry(self, job_id, "ocr")
 
 
-@celery.task(name="pantryops.checkin.barcode")
-def barcode_step(job_id: str) -> dict:
-    return execute_job_step(job_id, "barcode")
+@celery.task(bind=True, max_retries=3, name="pantryops.checkin.barcode")
+def barcode_step(self, job_id: str) -> dict:
+    return _execute_with_retry(self, job_id, "barcode")
 
 
-@celery.task(name="pantryops.checkin.product_enrichment")
-def product_enrichment_step(job_id: str) -> dict:
-    return execute_job_step(job_id, "product_enrichment")
+@celery.task(bind=True, max_retries=3, name="pantryops.checkin.product_enrichment")
+def product_enrichment_step(self, job_id: str) -> dict:
+    return _execute_with_retry(self, job_id, "product_enrichment")

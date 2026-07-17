@@ -1,3 +1,4 @@
+from backend.app.models.api_rate_limit import ApiRateLimit
 from backend.app.models.background_job import BackgroundJob
 from backend.app.models.confirmation_event import ShoppingConfirmationEvent
 from backend.app.models.consent import ConsentRecord
@@ -9,6 +10,7 @@ from backend.app.models.shopping_list import ShoppingList
 
 __all__ = [
     "LedgerChangeLog",
+    "ApiRateLimit",
     "BackgroundJob",
     "ConsentRecord",
     "ImageEvidenceRecord",

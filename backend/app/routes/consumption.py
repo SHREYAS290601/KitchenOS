@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.agents.consumption_update import ConsumptionClarification, ConsumptionUpdateAgent
-from backend.app.deps import get_db
+from backend.app.deps import DevUser, get_current_user, get_db
 from backend.app.models.pantry_item import PantryItem
 from backend.app.pantry.quantity import QuantityError
 from backend.app.schemas.sourced_field import EvidenceSource, FieldStatus, SourcedField
@@ -32,9 +32,15 @@ def _field_name(item: PantryItem) -> str | None:
     return str(item.canonical_name.get("value")) if item.canonical_name else None
 
 
-def _resolve_message_item(db: Session, message: str) -> PantryItem | None:
+def _resolve_message_item(
+    db: Session,
+    message: str,
+    user_id: uuid.UUID,
+) -> PantryItem | None:
     words = set(re.findall(r"[a-z0-9-]+", message.lower()))
-    for item in db.execute(select(PantryItem)).scalars():
+    for item in db.execute(
+        select(PantryItem).where(PantryItem.user_id == user_id)
+    ).scalars():
         name = _field_name(item)
         if name and set(name.lower().split()).issubset(words):
             return item
@@ -42,9 +48,18 @@ def _resolve_message_item(db: Session, message: str) -> PantryItem | None:
 
 
 @router.post("")
-def ad_hoc_consumption(payload: ConsumptionRequest, db: Session = Depends(get_db)) -> dict:
+def ad_hoc_consumption(
+    payload: ConsumptionRequest,
+    db: Session = Depends(get_db),
+    user: DevUser = Depends(get_current_user),
+) -> dict:
     if payload.pantry_item_id is not None:
-        item = db.get(PantryItem, payload.pantry_item_id)
+        item = db.scalar(
+            select(PantryItem).where(
+                PantryItem.pantry_item_id == payload.pantry_item_id,
+                PantryItem.user_id == user.user_id,
+            )
+        )
         if item is None:
             raise HTTPException(status_code=404, detail=f"pantry item {payload.pantry_item_id} not found")
         incoming = SourcedField(
@@ -61,7 +76,7 @@ def ad_hoc_consumption(payload: ConsumptionRequest, db: Session = Depends(get_db
         db.commit()
         return {"outcome": result.outcome, "quantity": item.quantity_value}
 
-    item = _resolve_message_item(db, payload.message or "")
+    item = _resolve_message_item(db, payload.message or "", user.user_id)
     if item is None:
         return {
             "clarification": ConsumptionClarification(

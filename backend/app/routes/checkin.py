@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.deps import DevUser, get_current_user, get_db
+from backend.app.deps import (
+    DevUser,
+    enforce_checkin_rate_limit,
+    get_current_user,
+    get_db,
+)
 from backend.app.models.background_job import BackgroundJob
 from backend.app.schemas.checkin import CheckInRequest, CheckInResponse, JobStatusOut
 from backend.app.services.checkin import (
@@ -24,6 +29,7 @@ def post_grocery_check_in(
     payload: CheckInRequest,
     db: Session = Depends(get_db),
     user: DevUser = Depends(get_current_user),
+    _rate_limit: None = Depends(enforce_checkin_rate_limit),
 ) -> CheckInResponse:
     try:
         job = create_check_in(db, user_id=user.user_id, request=payload)

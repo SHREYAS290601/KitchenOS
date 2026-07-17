@@ -94,7 +94,9 @@ class BackgroundJob(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dispatch_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     dispatch_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    retention_enforced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def set_step_status(self, step: str, status: StepStatus | str) -> None:
         if step not in CHECK_IN_STEPS:

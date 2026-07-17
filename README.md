@@ -59,21 +59,33 @@ The one rule that governs everything:
 
 ## Quickstart
 
-Phases 1–4 are implemented: the FastAPI backend, pantry ledger, shopping checklist, consent-gated images, while-shopping assistant, ask-don't-guess consumption updates, and the accessible Expo flow are runnable.
+Phases 1–5 are implemented: the FastAPI backend, pantry ledger, shopping checklist, consent-gated images, while-shopping assistant, ask-don't-guess consumption updates, and the accessible post-shopping check-in flow are runnable. Phase 5 uses durable database jobs plus Celery workers; the vision stages are intentionally typed stubs until Phase 6.
 
 ```bash
 docker compose up -d
 uv run alembic upgrade head
+export PANTRYOPS_API_TOKEN="$(openssl rand -hex 32)"
+export PANTRYOPS_USER_ID="00000000-0000-0000-0000-000000000001" # replace once with your stable UUID
 PANTRYOPS_DATABASE_URL=postgresql+psycopg://pantryops:pantryops@localhost:5432/pantryops \
 PANTRYOPS_REDIS_URL=redis://localhost:6379/0 \
 uv run uvicorn backend.app.main:create_app --factory --reload
 ```
 
-In another terminal:
+Keep the API token in your shell or secret manager; never commit it. In two more terminals, start the durable worker and its recovery/retention scheduler with the same database, Redis, and API-token environment:
+
+```bash
+uv run celery -A backend.app.workers.celery_app:celery worker --loglevel=INFO
+uv run celery -A backend.app.workers.celery_app:celery beat --loglevel=INFO
+```
+
+In another terminal, start the mobile development build:
 
 ```bash
 cd mobile
-EXPO_PUBLIC_API_URL=http://127.0.0.1:8000 npm start
+EXPO_PUBLIC_API_URL=http://127.0.0.1:8000 \
+npm start
 ```
 
-For a browser preview, run `npm run web -- --port 8081` and open `http://localhost:8081/assist`. Unit and integration checks are `uv run pytest` and `cd mobile && npm test -- --runInBand`.
+Open **Securely connect this device** in the app and paste `PANTRYOPS_API_TOKEN`. The credential is stored with Expo SecureStore and is never placed in an `EXPO_PUBLIC_*` bundle variable. This remains a single-user edge credential; use an identity provider and per-user short-lived tokens before turning the server into a shared multi-user service.
+
+For a browser preview, run `npm run web -- --port 8081` and open `http://localhost:8081/check-in`. Unit and integration checks are `uv run pytest` and `cd mobile && npm test -- --runInBand`. The changed Phase 5 mobile surface has an enforced 80% coverage gate via `cd mobile && npm run test:coverage:phase5`.

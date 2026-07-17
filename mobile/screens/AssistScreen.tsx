@@ -14,12 +14,18 @@ type Props = {
   shoppingSessionId?: string;
 };
 
-export function AssistScreen({ ask = askShoppingAssistant, onOpenCamera, photoUri, onRemovePhoto, shoppingSessionId = "mobile-session" }: Props) {
+function createAssistSessionId(): string {
+  return `assist-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function AssistScreen({ ask = askShoppingAssistant, onOpenCamera, photoUri, onRemovePhoto, shoppingSessionId }: Props) {
   const [question, setQuestion] = useState("");
   const [status, setStatus] = useState<"idle" | "consent" | "pending" | "answered" | "error">("idle");
   const [answer, setAnswer] = useState("");
   const [uploadedPhoto, setUploadedPhoto] = useState<{ uri: string; imageId: string } | null>(null);
   const [cachedConsent, setCachedConsent] = useState<CachedConsent | null>(null);
+  const [generatedSessionId] = useState(createAssistSessionId);
+  const activeClientSessionId = shoppingSessionId ?? generatedSessionId;
 
   useEffect(() => {
     let active = true;
@@ -41,9 +47,9 @@ export function AssistScreen({ ask = askShoppingAssistant, onOpenCamera, photoUr
     }
   };
 
-  const uploadAndAsk = async (choice: ConsentChoice) => {
+  const uploadAndAsk = async (choice: ConsentChoice, sessionId = activeClientSessionId) => {
     setStatus("pending");
-    const uploaded = await uploadAssistImage(photoUri!, shoppingSessionId, choice);
+    const uploaded = await uploadAssistImage(photoUri!, sessionId, choice);
     if (!uploaded.ok) {
       setAnswer(uploaded.message);
       setStatus("error");
@@ -58,7 +64,7 @@ export function AssistScreen({ ask = askShoppingAssistant, onOpenCamera, photoUr
     if (photoUri && uploadedPhoto?.uri !== photoUri) {
       const reusableChoice = cachedConsent?.choice;
       const canReuse = reusableChoice === "always" ||
-        (reusableChoice === "session" && cachedConsent?.shoppingSessionId === shoppingSessionId);
+        (reusableChoice === "session" && cachedConsent?.shoppingSessionId === activeClientSessionId);
       if (canReuse) void uploadAndAsk(reusableChoice);
       else setStatus("consent");
       return;
@@ -68,18 +74,19 @@ export function AssistScreen({ ask = askShoppingAssistant, onOpenCamera, photoUr
 
   const confirmConsent = async (choice: ConsentChoice) => {
     setStatus("pending");
-    const consent = await grantImageConsent(choice, shoppingSessionId);
+    const consent = await grantImageConsent(choice, activeClientSessionId);
     if (!consent.ok) {
       setAnswer(consent.message);
       setStatus("error");
       return;
     }
-    await saveCachedConsent(choice, shoppingSessionId);
+    const activeSessionId = consent.sessionId ?? activeClientSessionId;
+    await saveCachedConsent(choice, activeSessionId);
     setCachedConsent(choice === "answer_only" ? null : {
       choice,
-      shoppingSessionId: choice === "session" ? shoppingSessionId : null,
+      shoppingSessionId: choice === "session" ? activeSessionId : null,
     });
-    await uploadAndAsk(choice);
+    await uploadAndAsk(choice, activeSessionId);
   };
 
   return (

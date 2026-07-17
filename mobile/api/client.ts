@@ -1,6 +1,23 @@
 import { File, UploadType } from "expo-file-system";
+import * as SecureStore from "expo-secure-store";
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_TOKEN_KEY = "pantryops.api-token";
+
+export async function saveApiToken(token: string): Promise<void> {
+  const normalized = token.trim();
+  if (normalized.length < 32) {
+    throw new Error("API token must be at least 32 characters");
+  }
+  await SecureStore.setItemAsync(API_TOKEN_KEY, normalized);
+}
+
+async function authorizedHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
+  const token = await SecureStore.getItemAsync(API_TOKEN_KEY);
+  return token
+    ? { ...extra, Authorization: `Bearer ${token}` }
+    : { ...extra };
+}
 
 export type Health = { status: string; service: string };
 
@@ -44,7 +61,9 @@ export async function getPantryItem(
 ): Promise<ApiResult<PantryItemPayload>> {
   let response: Response;
   try {
-    response = await fetch(`${BASE_URL}/pantry/items/${itemId}`);
+    response = await fetch(`${BASE_URL}/pantry/items/${itemId}`, {
+      headers: await authorizedHeaders(),
+    });
   } catch {
     return { ok: false, error: "unreachable" };
   }
@@ -69,7 +88,7 @@ export async function confirmShoppingItem(
       `${BASE_URL}/shopping-lists/${listId}/items/${itemId}/confirm`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authorizedHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ status: "bought" }),
       },
     );
@@ -99,7 +118,7 @@ export async function postFieldAction(
   try {
     response = await fetch(`${BASE_URL}/pantry/items/${itemId}/fields/${fieldName}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authorizedHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(action === "edit" ? { action, value } : { action }),
     });
   } catch {
@@ -140,22 +159,27 @@ const CONSENT_PAYLOADS = {
 
 export async function grantImageConsent(
   choice: ConsentChoice,
-  shoppingSessionId: string,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+  _shoppingSessionId?: string,
+): Promise<{ ok: true; sessionId: string | null } | { ok: false; message: string }> {
   try {
     const response = await fetch(`${BASE_URL}/consent`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authorizedHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         ...CONSENT_PAYLOADS[choice],
-        shopping_session_id: choice === "session" ? shoppingSessionId : null,
       }),
     });
+    const body = (await response.json()) as {
+      shopping_session_id?: string | null;
+      detail?: string;
+    };
     if (!response.ok) {
-      const body = (await response.json()) as { detail?: string };
       return { ok: false, message: body.detail ?? "Could not save image consent" };
     }
-    return { ok: true };
+    if (choice === "session" && !body.shopping_session_id) {
+      return { ok: false, message: "The server did not create a shopping session" };
+    }
+    return { ok: true, sessionId: body.shopping_session_id ?? null };
   } catch {
     return { ok: false, message: "Could not reach the server to save image consent" };
   }
@@ -182,6 +206,7 @@ export async function uploadAssistImage(
         shopping_session_id: shoppingSessionId,
         retention_policy: CONSENT_PAYLOADS[choice].retention_policy,
       },
+      headers: await authorizedHeaders(),
       sessionType: "foreground",
     });
     const body = JSON.parse(response.body) as { image_id?: string; detail?: string };
@@ -205,12 +230,12 @@ export type AssistPayload = {
 export async function askShoppingAssistant(
   question: string,
   imageId?: string,
-  shoppingSessionId = "mobile-session",
+  shoppingSessionId?: string,
 ): Promise<{ ok: true; data: AssistPayload } | { ok: false; message: string }> {
   try {
     const response = await fetch(`${BASE_URL}/shopping/assist`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authorizedHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ question, image_id: imageId, shopping_session_id: shoppingSessionId }),
     });
     const body = (await response.json()) as AssistPayload & { detail?: string };
@@ -228,6 +253,7 @@ export type CheckInJob = {
   jobId: string;
   status: "queued" | "processing" | "completed" | "failed" | "needs_review";
   steps: CheckInStep[];
+  error?: "consent_revoked" | "processing_failed" | null;
 };
 export type CheckInResult =
   | { ok: true; data: CheckInJob }
@@ -237,8 +263,39 @@ function mapCheckInJob(body: {
   job_id: string;
   status: CheckInJob["status"];
   steps: CheckInStep[];
+  error?: CheckInJob["error"];
 }): CheckInJob {
-  return { jobId: body.job_id, status: body.status, steps: [...body.steps] };
+  return {
+    jobId: body.job_id,
+    status: body.status,
+    steps: [...body.steps],
+    error: body.error ?? null,
+  };
+}
+
+const CHECK_IN_STATUSES = new Set(["queued", "processing", "completed", "failed", "needs_review"]);
+
+function isCheckInBody(body: {
+  job_id?: unknown;
+  status?: unknown;
+  steps?: unknown;
+  error?: unknown;
+}): body is {
+  job_id: string;
+  status: CheckInJob["status"];
+  steps: CheckInStep[];
+  error?: CheckInJob["error"];
+} {
+  return typeof body.job_id === "string"
+    && typeof body.status === "string"
+    && CHECK_IN_STATUSES.has(body.status)
+    && Array.isArray(body.steps)
+    && body.steps.every((step) => (
+      typeof step === "object"
+      && step !== null
+      && typeof (step as CheckInStep).step === "string"
+      && typeof (step as CheckInStep).status === "string"
+    ));
 }
 
 export async function uploadCheckInImage(
@@ -260,6 +317,7 @@ export async function uploadCheckInImage(
         shopping_session_id: shoppingSessionId,
         retention_policy: "delete_after_enrichment",
       },
+      headers: await authorizedHeaders(),
       sessionType: "foreground",
     });
     const body = JSON.parse(response.body) as { image_id?: string; detail?: string };
@@ -279,7 +337,7 @@ export async function postCheckIn(
   try {
     const response = await fetch(`${BASE_URL}/check-in/groceries`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authorizedHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         shopping_session_id: shoppingSessionId,
         image_ids: [...imageIds],
@@ -291,13 +349,19 @@ export async function postCheckIn(
       status?: CheckInJob["status"];
       steps?: CheckInStep[];
       detail?: string;
+      error?: CheckInJob["error"];
     };
-    if (!response.ok || !body.job_id || !body.status || !body.steps) {
+    if (!response.ok || !isCheckInBody(body)) {
       return { ok: false, message: body.detail ?? "Could not start grocery check-in" };
     }
     return {
       ok: true,
-      data: mapCheckInJob({ job_id: body.job_id, status: body.status, steps: body.steps }),
+      data: mapCheckInJob({
+        job_id: body.job_id,
+        status: body.status,
+        steps: body.steps,
+        error: body.error,
+      }),
     };
   } catch {
     return { ok: false, message: "Could not reach the server to start grocery check-in" };
@@ -306,19 +370,27 @@ export async function postCheckIn(
 
 export async function getJobStatus(jobId: string): Promise<CheckInResult> {
   try {
-    const response = await fetch(`${BASE_URL}/jobs/${jobId}`);
+    const response = await fetch(`${BASE_URL}/jobs/${jobId}`, {
+      headers: await authorizedHeaders(),
+    });
     const body = (await response.json()) as {
       job_id?: string;
       status?: CheckInJob["status"];
       steps?: CheckInStep[];
       detail?: string;
+      error?: CheckInJob["error"];
     };
-    if (!response.ok || !body.job_id || !body.status || !body.steps) {
+    if (!response.ok || !isCheckInBody(body)) {
       return { ok: false, message: body.detail ?? "Could not refresh check-in status" };
     }
     return {
       ok: true,
-      data: mapCheckInJob({ job_id: body.job_id, status: body.status, steps: body.steps }),
+      data: mapCheckInJob({
+        job_id: body.job_id,
+        status: body.status,
+        steps: body.steps,
+        error: body.error,
+      }),
     };
   } catch {
     return { ok: false, message: "Could not reach the server for check-in status" };

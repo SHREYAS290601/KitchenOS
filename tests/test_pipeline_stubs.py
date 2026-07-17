@@ -1,4 +1,10 @@
 import uuid
+import json
+import subprocess
+import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -17,6 +23,7 @@ from backend.app.workers.steps import (
     ocr_step,
     product_enrichment_step,
     segmentation_step,
+    execute_job_step,
 )
 
 
@@ -44,12 +51,35 @@ def test_eager_mode_runs_inline():
     assert add.delay(2, 3).get() == 5
 
 
+def test_fresh_worker_import_registers_tasks_and_beat_schedule():
+    probe = (
+        "import json; "
+        "from backend.app.workers.celery_app import celery; "
+        "celery.loader.import_default_modules(); "
+        "print(json.dumps({'tasks': sorted(k for k in celery.tasks if k.startswith('pantryops.')), "
+        "'beat': sorted((celery.conf.beat_schedule or {}).keys())}))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    registered = json.loads(result.stdout)
+
+    assert "pantryops.checkin.segmentation" in registered["tasks"]
+    assert "pantryops.checkin.run_pipeline" in registered["tasks"]
+    assert "enforce-image-retention-hourly" in registered["beat"]
+    assert "dispatch-pending-check-ins" in registered["beat"]
+
+
 def add_job(db):
     user_id = uuid.uuid4()
     consent = ConsentRecord(
         user_id=user_id,
         state=ConsentState.granted_for_session,
         session_id="session-001",
+        session_expires_at=datetime.now(timezone.utc) + timedelta(hours=8),
         retention_policy=RetentionPolicy.delete_after_enrichment,
     )
     image = ImageEvidenceRecord(
@@ -114,6 +144,121 @@ def test_completed_step_retry_is_idempotent(db, tables):
     assert next(step for step in stored.steps if step["step"] == "segmentation")["status"] == "completed"
 
 
+def test_concurrent_duplicate_delivery_executes_step_body_once(db, tables, monkeypatch):
+    from backend.app.workers import steps
+
+    job, _consent = add_job(db)
+    first_entered = threading.Event()
+    duplicate_entered = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    def observe(step_name, job_id):
+        calls.append(step_name)
+        if len(calls) == 1:
+            first_entered.set()
+            assert release.wait(5)
+        else:
+            duplicate_entered.set()
+        return {"job_id": str(job_id), "step": step_name, "candidates": []}
+
+    monkeypatch.setattr(steps, "run_stub", observe)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(execute_job_step, str(job.job_id), "segmentation")
+        assert first_entered.wait(5)
+        second = pool.submit(execute_job_step, str(job.job_id), "segmentation")
+        assert duplicate_entered.wait(0.2) is False
+        release.set()
+        first.result(timeout=5)
+        second.result(timeout=5)
+
+    assert calls == ["segmentation"]
+
+
+def test_transient_step_errors_retry_before_terminal_failure(monkeypatch):
+    from backend.app.workers import steps
+
+    class RetryScheduled(Exception):
+        pass
+
+    class FakeTask:
+        max_retries = 3
+        request = type("Request", (), {"retries": 1})()
+
+        def retry(self, *, exc, countdown):
+            assert isinstance(exc, OSError)
+            assert countdown == 2
+            raise RetryScheduled
+
+    monkeypatch.setattr(
+        steps,
+        "execute_job_step",
+        lambda *_args: (_ for _ in ()).throw(OSError("temporary storage outage")),
+    )
+    monkeypatch.setattr(
+        steps,
+        "_mark_failed",
+        lambda *_args: pytest.fail("transient error was marked terminal before retries"),
+    )
+
+    with pytest.raises(RetryScheduled):
+        steps._execute_with_retry(FakeTask(), str(uuid.uuid4()), "ocr")
+
+
+def test_permanent_failure_and_duplicate_delivery_leave_consistent_state(db, tables, monkeypatch):
+    from backend.app.workers import steps
+
+    job, _consent = add_job(db)
+    calls: list[str] = []
+
+    def fail(step_name, _job_id):
+        calls.append(step_name)
+        raise RuntimeError("permanent model failure")
+
+    monkeypatch.setattr(steps, "run_stub", fail)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [
+            pool.submit(execute_job_step, str(job.job_id), "ocr")
+            for _ in range(2)
+        ]
+        failures = 0
+        for result in results:
+            try:
+                result.result(timeout=5)
+            except RuntimeError:
+                failures += 1
+
+    db.expire_all()
+    stored = db.get(BackgroundJob, job.job_id)
+    assert failures == 1
+    assert calls == ["ocr"]
+    assert stored.status == JobStatus.failed
+    assert stored.error == "processing_failed"
+    assert next(step for step in stored.steps if step["step"] == "ocr")["status"] == "failed"
+
+
+def test_late_delivery_cannot_resurrect_needs_review_job(db, tables, monkeypatch):
+    from backend.app.workers import steps
+
+    job, _consent = add_job(db)
+    job.status = JobStatus.needs_review
+    job.completed_at = datetime.now(timezone.utc)
+    db.commit()
+    monkeypatch.setattr(
+        steps,
+        "run_stub",
+        lambda *_args: pytest.fail("terminal needs-review job executed a late step"),
+    )
+
+    result = execute_job_step(str(job.job_id), "ocr")
+
+    db.expire_all()
+    stored = db.get(BackgroundJob, job.job_id)
+    assert result["step"] == "ocr"
+    assert stored.status == JobStatus.needs_review
+    assert next(step for step in stored.steps if step["step"] == "ocr")["status"] == "queued"
+
+
 def test_step_failure_marks_step_and_job_failed(db, tables, monkeypatch):
     from backend.app.workers import steps
 
@@ -129,7 +274,7 @@ def test_step_failure_marks_step_and_job_failed(db, tables, monkeypatch):
     db.expire_all()
     stored = db.get(BackgroundJob, job.job_id)
     assert stored.status == "failed"
-    assert stored.error == "stub exploded"
+    assert stored.error == "processing_failed"
     assert next(step for step in stored.steps if step["step"] == "ocr")["status"] == "failed"
 
 
@@ -229,8 +374,9 @@ def test_enrichment_service_preserves_user_confirmed_field_as_conflict(db, table
         EnrichmentContext,
     )
 
+    job, _consent = add_job(db)
     item = PantryItem(
-        user_id=uuid.uuid4(),
+        user_id=job.user_id,
         brand=SourcedField(
             value="Trusted Brand",
             source=EvidenceSource.user_confirmed,
@@ -254,9 +400,77 @@ def test_enrichment_service_preserves_user_confirmed_field_as_conflict(db, table
         )
     )
 
-    results = apply_enrichment_proposal(db, item, proposal)
+    results = apply_enrichment_proposal(db, item, proposal, job=job)
     db.commit()
 
     assert results[0].outcome == "conflict"
     assert item.brand["value"] == "Trusted Brand"
     assert item.brand["conflict_candidates"][0]["status"] == "conflicting"
+
+
+def test_enrichment_service_never_writes_a_blocked_batch(db, tables, monkeypatch):
+    from backend.app.agents.auditor import AuditVerdict
+    from backend.app.agents.background_enrichment import (
+        BackgroundEnrichmentAgent,
+        EnrichmentCandidate,
+        EnrichmentContext,
+    )
+    from backend.app.services import background_enrichment as service
+
+    job, _consent = add_job(db)
+    item = PantryItem(user_id=job.user_id, quantity_type="unknown", status="stored")
+    db.add(item)
+    db.commit()
+    proposal = BackgroundEnrichmentAgent().run(
+        EnrichmentContext(
+            candidates=[EnrichmentCandidate(field_name="brand", value="Blocked", confidence=0.9)]
+        )
+    )
+
+    class BlockingAuditor:
+        def review_background(self, _proposal, *, consent_valid):
+            return AuditVerdict(verdict="block", reasons=["blocked_for_test"])
+
+    monkeypatch.setattr(
+        service,
+        "apply_update",
+        lambda *_args, **_kwargs: pytest.fail("blocked batch reached the ledger"),
+    )
+
+    with pytest.raises(service.EnrichmentAuditBlocked):
+        service.apply_enrichment_proposal(
+            db,
+            item,
+            proposal,
+            job=job,
+            auditor=BlockingAuditor(),
+        )
+
+
+def test_enrichment_service_derives_current_consent_from_job_images(db, tables, monkeypatch):
+    from backend.app.agents.background_enrichment import (
+        BackgroundEnrichmentAgent,
+        EnrichmentCandidate,
+        EnrichmentContext,
+    )
+    from backend.app.services import background_enrichment as service
+
+    job, consent = add_job(db)
+    item = PantryItem(user_id=job.user_id, quantity_type="unknown", status="stored")
+    db.add(item)
+    consent.state = ConsentState.revoked
+    consent.session_id = None
+    db.commit()
+    proposal = BackgroundEnrichmentAgent().run(
+        EnrichmentContext(
+            candidates=[EnrichmentCandidate(field_name="brand", value="Blocked", confidence=0.9)]
+        )
+    )
+    monkeypatch.setattr(
+        service,
+        "apply_update",
+        lambda *_args, **_kwargs: pytest.fail("revoked job reached the ledger"),
+    )
+
+    with pytest.raises(service.EnrichmentAuditBlocked):
+        service.apply_enrichment_proposal(db, item, proposal, job=job)

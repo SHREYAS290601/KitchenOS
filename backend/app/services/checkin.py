@@ -1,9 +1,9 @@
 import logging
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.app.models.background_job import BackgroundJob, JobStatus, initial_check_in_steps
@@ -12,6 +12,7 @@ from backend.app.models.image_evidence import ImageEvidenceRecord
 from backend.app.schemas.checkin import CheckInRequest
 
 logger = logging.getLogger(__name__)
+_DISPATCH_LEASE = timedelta(minutes=15)
 
 
 class CheckInImagesNotFound(LookupError):
@@ -58,6 +59,8 @@ def consent_allows_processing(db: Session, image: ImageEvidenceRecord) -> bool:
         return bool(
             current.session_id
             and current.session_id == image.linked_shopping_session_id
+            and current.session_expires_at
+            and current.session_expires_at > datetime.now(timezone.utc)
         )
     return True
 
@@ -73,6 +76,7 @@ def _load_owned_images(
             select(ImageEvidenceRecord).where(
                 ImageEvidenceRecord.image_id.in_(image_ids),
                 ImageEvidenceRecord.user_id == user_id,
+                ImageEvidenceRecord.deleted_at.is_(None),
             )
         )
     )
@@ -118,10 +122,12 @@ def create_check_in(
 
 
 def enqueue_check_in(job_id: uuid.UUID) -> None:
-    """Lazy import keeps API startup independent from task registration order."""
-    from backend.app.workers.pipeline import run_check_in_pipeline
+    """Publish the real chain so there is no launcher-to-chain crash window."""
+    from backend.app.workers.pipeline import build_check_in_pipeline
 
-    run_check_in_pipeline.delay(str(job_id))
+    build_check_in_pipeline(str(job_id)).apply_async(
+        task_id=f"check-in-{job_id}",
+    )
 
 
 def dispatch_background_job(
@@ -129,13 +135,23 @@ def dispatch_background_job(
     job_id: uuid.UUID,
     enqueue: Callable[[uuid.UUID], None] = enqueue_check_in,
 ) -> bool:
-    job = db.get(BackgroundJob, job_id)
+    now = datetime.now(timezone.utc)
+    claim_cutoff = now - _DISPATCH_LEASE
+    job = db.scalar(
+        select(BackgroundJob)
+        .where(BackgroundJob.job_id == job_id)
+        .with_for_update()
+    )
     if job is None:
         return False
     if job.dispatched_at is not None:
         return True
+    if job.dispatch_claimed_at is not None and job.dispatch_claimed_at > claim_cutoff:
+        db.rollback()
+        return False
 
     job.dispatch_attempts += 1
+    job.dispatch_claimed_at = now
     # Persist the dispatch attempt before touching Redis. The queued job is the
     # durable outbox record and is therefore visible/recoverable first.
     db.commit()
@@ -143,12 +159,17 @@ def dispatch_background_job(
         enqueue(job_id)
     except Exception:
         logger.exception("check-in dispatch failed", extra={"job_id": str(job_id)})
+        job = db.get(BackgroundJob, job_id)
+        if job is not None:
+            job.dispatch_claimed_at = None
+            db.commit()
         return False
 
     job = db.get(BackgroundJob, job_id)
     if job is None:
         return False
     job.dispatched_at = datetime.now(timezone.utc)
+    job.dispatch_claimed_at = None
     db.commit()
     return True
 
@@ -159,15 +180,21 @@ def dispatch_pending_jobs(
     *,
     limit: int = 100,
 ) -> int:
-    jobs = list(
+    claim_cutoff = datetime.now(timezone.utc) - _DISPATCH_LEASE
+    job_ids = list(
         db.scalars(
-            select(BackgroundJob)
+            select(BackgroundJob.job_id)
             .where(
-                BackgroundJob.status == JobStatus.queued,
+                BackgroundJob.status.in_([JobStatus.queued, JobStatus.processing]),
                 BackgroundJob.dispatched_at.is_(None),
+                or_(
+                    BackgroundJob.dispatch_claimed_at.is_(None),
+                    BackgroundJob.dispatch_claimed_at < claim_cutoff,
+                ),
             )
             .order_by(BackgroundJob.created_at)
             .limit(limit)
         )
     )
-    return sum(dispatch_background_job(db, job.job_id, enqueue) for job in jobs)
+    db.rollback()
+    return sum(dispatch_background_job(db, job_id, enqueue) for job_id in job_ids)

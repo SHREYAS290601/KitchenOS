@@ -1,10 +1,11 @@
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ShoppingListCreate(BaseModel):
-    user_id: uuid.UUID
+    model_config = ConfigDict(extra="forbid")
+
     goal: str
     cuisine_preferences: list[str] = Field(default_factory=list)
     dietary_restrictions: list[str] = Field(default_factory=list)

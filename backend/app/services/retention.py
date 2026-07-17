@@ -51,7 +51,11 @@ def enforce_retention_for_job(
     job_id: uuid.UUID,
 ) -> int:
     job = db.get(BackgroundJob, job_id)
-    if job is None or JobStatus(job.status) not in _TERMINAL_JOB_STATUSES:
+    if (
+        job is None
+        or JobStatus(job.status) not in _TERMINAL_JOB_STATUSES
+        or job.retention_enforced_at is not None
+    ):
         return 0
     image_ids = [uuid.UUID(image_id) for image_id in job.image_ids]
     images = list(
@@ -64,7 +68,12 @@ def enforce_retention_for_job(
             )
         )
     )
-    return _delete_images(db, store, images)
+    deleted = _delete_images(db, store, images)
+    job = db.get(BackgroundJob, job_id)
+    if job is not None:
+        job.retention_enforced_at = datetime.now(timezone.utc)
+        db.commit()
+    return deleted
 
 
 def sweep_retention(db: Session, store: ObjectStore) -> int:
@@ -80,11 +89,30 @@ def sweep_retention(db: Session, store: ObjectStore) -> int:
             )
         )
     )
-    deleted = _delete_images(db, store, due_after_answer)
+    referenced_ids = {
+        uuid.UUID(image_id)
+        for image_ids in db.scalars(select(BackgroundJob.image_ids))
+        for image_id in image_ids
+    }
+    due_orphans = [
+        image
+        for image in db.scalars(
+            select(ImageEvidenceRecord).where(
+                ImageEvidenceRecord.retention_policy
+                == RetentionPolicy.delete_after_enrichment,
+                ImageEvidenceRecord.retention_due_at.is_not(None),
+                ImageEvidenceRecord.retention_due_at <= now,
+                ImageEvidenceRecord.deleted_at.is_(None),
+            )
+        )
+        if image.image_id not in referenced_ids
+    ]
+    deleted = _delete_images(db, store, due_after_answer + due_orphans)
     terminal_jobs = list(
         db.scalars(
             select(BackgroundJob).where(
-                BackgroundJob.status.in_(_TERMINAL_JOB_STATUSES)
+                BackgroundJob.status.in_(_TERMINAL_JOB_STATUSES),
+                BackgroundJob.retention_enforced_at.is_(None),
             )
         )
     )

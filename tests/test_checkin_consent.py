@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,6 +43,11 @@ def add_consent(db, state: ConsentState, *, session_id="session-001"):
         user_id=USER_ID,
         state=state,
         session_id=session_id if state == ConsentState.granted_for_session else None,
+        session_expires_at=(
+            datetime.now(timezone.utc) + timedelta(hours=8)
+            if state == ConsentState.granted_for_session
+            else None
+        ),
         retention_policy=RetentionPolicy.delete_after_enrichment,
     )
     db.add(row)
@@ -219,6 +224,27 @@ def test_due_delete_after_answer_image_is_swept_idempotently(db, tables, tmp_pat
     db.refresh(image)
     assert image.deleted_at is not None
     assert sweep_retention(db, store) == 0
+
+
+def test_due_orphaned_checkin_upload_is_swept(db, tables, tmp_path):
+    store = LocalObjectStore(tmp_path)
+    image = ImageEvidenceRecord(
+        user_id=uuid.uuid4(),
+        capture_context="post_shopping_check_in",
+        processing_mode="silent_background_enrichment",
+        linked_shopping_session_id="abandoned-session",
+        storage_uri=store.put_image(b"photo", content_type="image/jpeg"),
+        consent_status=ConsentState.granted_for_session,
+        retention_policy=RetentionPolicy.delete_after_enrichment,
+        stored_for_future_enrichment=True,
+        retention_due_at=datetime.now(timezone.utc),
+    )
+    db.add(image)
+    db.commit()
+
+    assert sweep_retention(db, store) == 1
+    db.refresh(image)
+    assert image.deleted_at is not None
 
 
 def test_retention_task_is_registered_with_celery_beat():

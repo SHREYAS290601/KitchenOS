@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -48,6 +49,11 @@ def add_image(
                 state=consent_status,
                 session_id=(
                     session_id
+                    if consent_status == ConsentState.granted_for_session
+                    else None
+                ),
+                session_expires_at=(
+                    datetime.now(timezone.utc) + timedelta(hours=8)
                     if consent_status == ConsentState.granted_for_session
                     else None
                 ),
@@ -171,6 +177,54 @@ def test_enqueue_failure_leaves_committed_job_queued(client, db, monkeypatch):
     assert job.status == "queued"
     assert job.dispatched_at is None
     assert job.dispatch_attempts == 1
+    assert job.dispatch_claimed_at is None
+
+
+def test_pending_dispatch_retries_a_broker_failure(client, db, monkeypatch):
+    from backend.app.routes import checkin as checkin_route
+    from backend.app.services.checkin import dispatch_pending_jobs
+
+    image = add_image(db)
+    monkeypatch.setattr(
+        checkin_route,
+        "enqueue_check_in",
+        lambda _job_id: (_ for _ in ()).throw(ConnectionError("broker unavailable")),
+    )
+    response = client.post(
+        "/check-in/groceries",
+        json=check_in_payload([image.image_id]),
+    )
+    job_id = uuid.UUID(response.json()["job_id"])
+    dispatched = []
+
+    assert dispatch_pending_jobs(db, lambda value: dispatched.append(value)) == 1
+    db.expire_all()
+    job = db.get(BackgroundJob, job_id)
+
+    assert dispatched == [job_id]
+    assert job.dispatched_at is not None
+    assert job.dispatch_attempts == 2
+
+
+def test_recent_dispatch_claim_prevents_duplicate_enqueue(db, tables):
+    from backend.app.services.checkin import dispatch_background_job
+
+    job = BackgroundJob(
+        user_id=USER_ID,
+        image_ids=[str(uuid.uuid4())],
+        dispatch_claimed_at=datetime.now(timezone.utc),
+    )
+    db.add(job)
+    db.commit()
+    dispatched = []
+
+    assert dispatch_background_job(db, job.job_id, dispatched.append) is False
+    assert dispatched == []
+
+    job.dispatch_claimed_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    db.commit()
+    assert dispatch_background_job(db, job.job_id, dispatched.append) is True
+    assert dispatched == [job.job_id]
 
 
 def test_job_status_reads_durable_steps_and_is_user_scoped(client, db, monkeypatch):
@@ -193,6 +247,19 @@ def test_job_status_reads_durable_steps_and_is_user_scoped(client, db, monkeypat
     job.user_id = OTHER_USER_ID
     db.commit()
     assert client.get(f"/jobs/{job.job_id}").status_code == 404
+
+
+def test_deleted_image_cannot_start_a_checkin(client, db):
+    image = add_image(db)
+    image.deleted_at = datetime.now(timezone.utc)
+    db.commit()
+
+    response = client.post(
+        "/check-in/groceries",
+        json=check_in_payload([image.image_id]),
+    )
+
+    assert response.status_code == 404
 
 
 def test_mobile_check_in_agent_refuses_zero_images():

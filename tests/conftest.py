@@ -11,6 +11,8 @@ TEST_DATABASE_URL = os.environ.get(
 )
 os.environ.setdefault("PANTRYOPS_DATABASE_URL", TEST_DATABASE_URL)
 os.environ.setdefault("PANTRYOPS_REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("PANTRYOPS_API_TOKEN", "test-api-token-with-minimum-32-chars")
+os.environ.setdefault("PANTRYOPS_USER_ID", "00000000-0000-0000-0000-000000000001")
 
 
 @pytest.fixture(scope="session")

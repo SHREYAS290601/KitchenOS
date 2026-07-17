@@ -4,6 +4,21 @@ from celery import Celery
 
 from backend.app.config import Settings
 
+_WORKER_IMPORTS = (
+    "backend.app.workers.steps",
+    "backend.app.workers.pipeline",
+)
+_BEAT_SCHEDULE = {
+    "enforce-image-retention-hourly": {
+        "task": "pantryops.retention.sweep",
+        "schedule": 3600.0,
+    },
+    "dispatch-pending-check-ins": {
+        "task": "pantryops.checkin.dispatch_pending",
+        "schedule": 30.0,
+    },
+}
+
 
 def _configure(app: Celery, redis_url: str) -> Celery:
     app.conf.update(
@@ -14,6 +29,12 @@ def _configure(app: Celery, redis_url: str) -> Celery:
         accept_content=["json"],
         timezone="UTC",
         enable_utc=True,
+        imports=_WORKER_IMPORTS,
+        beat_schedule={key: dict(value) for key, value in _BEAT_SCHEDULE.items()},
+        task_acks_late=True,
+        task_reject_on_worker_lost=True,
+        task_publish_retry=True,
+        worker_prefetch_multiplier=1,
     )
     return app
 

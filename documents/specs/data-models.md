@@ -176,6 +176,7 @@ Cross-off confirms **purchase only** — never brand, price, size, or nutrition.
 Consent states: `not_requested | denied | granted_for_single_image | granted_for_session | always_granted | revoked`.
 Retention policies: `delete_after_answer | delete_after_enrichment | keep_for_pantry_memory | keep_until_manually_deleted`.
 No image row may exist without a consent status (invariant 4).
+Post-shopping uploads that never become part of a job receive a short cleanup deadline. Session consent is server-issued, expires after eight hours, and is re-checked at upload, job creation, and every worker step.
 
 ### 4.6 VisionDetection (`models/vision_detection.py`)
 
@@ -267,6 +268,8 @@ Rules: strong preferences only after first use (before first use → `preference
   "image_ids": ["img_001", "img_002"],
   "created_at": "timestamp",
   "completed_at": null,
+  "dispatch_claimed_at": null,
+  "retention_enforced_at": null,
   "error": null,
   "steps": [
     { "step": "image_storage",      "status": "completed" },
@@ -279,7 +282,7 @@ Rules: strong preferences only after first use (before first use → `preference
 }
 ```
 
-Written in the same transaction as the check-in request. The job row — not Celery — is the durable source of truth for status.
+Written in the same transaction as the check-in request. The job row — not Celery — is the durable source of truth for status. A leased dispatch claim prevents duplicate pipeline publication while a periodic relay recovers committed jobs after broker failures. `retention_enforced_at` makes terminal cleanup idempotent.
 
 ---
 
