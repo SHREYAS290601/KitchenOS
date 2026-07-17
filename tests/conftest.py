@@ -9,6 +9,8 @@ TEST_DATABASE_URL = os.environ.get(
     "PANTRYOPS_TEST_DATABASE_URL",
     "postgresql+psycopg://pantryops:pantryops@localhost:5432/pantryops",
 )
+os.environ.setdefault("PANTRYOPS_DATABASE_URL", TEST_DATABASE_URL)
+os.environ.setdefault("PANTRYOPS_REDIS_URL", "redis://localhost:6379/0")
 
 
 @pytest.fixture(scope="session")
