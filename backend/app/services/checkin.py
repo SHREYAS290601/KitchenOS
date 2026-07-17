@@ -1,0 +1,128 @@
+import logging
+import uuid
+from collections.abc import Callable
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from backend.app.models.background_job import BackgroundJob, JobStatus, initial_check_in_steps
+from backend.app.models.image_evidence import ImageEvidenceRecord
+from backend.app.schemas.checkin import CheckInRequest
+
+logger = logging.getLogger(__name__)
+
+
+class CheckInImagesNotFound(LookupError):
+    pass
+
+
+class InvalidCheckInImages(ValueError):
+    pass
+
+
+def _load_owned_images(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    image_ids: list[uuid.UUID],
+) -> list[ImageEvidenceRecord]:
+    images = list(
+        db.scalars(
+            select(ImageEvidenceRecord).where(
+                ImageEvidenceRecord.image_id.in_(image_ids),
+                ImageEvidenceRecord.user_id == user_id,
+            )
+        )
+    )
+    if len(images) != len(image_ids):
+        raise CheckInImagesNotFound("one or more images were not found")
+    by_id = {image.image_id: image for image in images}
+    return [by_id[image_id] for image_id in image_ids]
+
+
+def create_check_in(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    request: CheckInRequest,
+) -> BackgroundJob:
+    images = _load_owned_images(db, user_id=user_id, image_ids=request.image_ids)
+    invalid = [
+        image
+        for image in images
+        if image.capture_context != "post_shopping_check_in"
+        or image.processing_mode != request.processing_mode
+        or image.linked_shopping_session_id != request.shopping_session_id
+    ]
+    if invalid:
+        raise InvalidCheckInImages(
+            "all images must be post-shopping uploads linked to this shopping session"
+        )
+
+    job = BackgroundJob(
+        job_type="grocery_image_check_in",
+        status=JobStatus.queued,
+        user_id=user_id,
+        image_ids=[str(image_id) for image_id in request.image_ids],
+        steps=initial_check_in_steps(),
+    )
+    db.add(job)
+    db.flush()
+    return job
+
+
+def enqueue_check_in(job_id: uuid.UUID) -> None:
+    """Lazy import keeps API startup independent from task registration order."""
+    from backend.app.workers.pipeline import run_check_in_pipeline
+
+    run_check_in_pipeline.delay(str(job_id))
+
+
+def dispatch_background_job(
+    db: Session,
+    job_id: uuid.UUID,
+    enqueue: Callable[[uuid.UUID], None] = enqueue_check_in,
+) -> bool:
+    job = db.get(BackgroundJob, job_id)
+    if job is None:
+        return False
+    if job.dispatched_at is not None:
+        return True
+
+    job.dispatch_attempts += 1
+    # Persist the dispatch attempt before touching Redis. The queued job is the
+    # durable outbox record and is therefore visible/recoverable first.
+    db.commit()
+    try:
+        enqueue(job_id)
+    except Exception:
+        logger.exception("check-in dispatch failed", extra={"job_id": str(job_id)})
+        return False
+
+    job = db.get(BackgroundJob, job_id)
+    if job is None:
+        return False
+    job.dispatched_at = datetime.now(timezone.utc)
+    db.commit()
+    return True
+
+
+def dispatch_pending_jobs(
+    db: Session,
+    enqueue: Callable[[uuid.UUID], None] = enqueue_check_in,
+    *,
+    limit: int = 100,
+) -> int:
+    jobs = list(
+        db.scalars(
+            select(BackgroundJob)
+            .where(
+                BackgroundJob.status == JobStatus.queued,
+                BackgroundJob.dispatched_at.is_(None),
+            )
+            .order_by(BackgroundJob.created_at)
+            .limit(limit)
+        )
+    )
+    return sum(dispatch_background_job(db, job.job_id, enqueue) for job in jobs)

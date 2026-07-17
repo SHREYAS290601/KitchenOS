@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Iterator
+import uuid
 
 from fastapi import Request
 from sqlalchemy.orm import Session
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 
 @dataclass(frozen=True)
 class DevUser:
-    user_id: str = "dev-user-001"
+    user_id: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 def get_db(request: Request) -> Iterator[Session]:

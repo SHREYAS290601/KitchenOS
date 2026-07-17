@@ -61,7 +61,10 @@ def app_with_probe_route(monkeypatch):
 def test_get_current_user_returns_dev_user(app_with_probe_route):
     r = TestClient(app_with_probe_route).get("/_probe")
     assert r.status_code == 200
-    assert r.json() == {"user_id": "dev-user-001", "db_open": True}
+    assert r.json() == {
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "db_open": True,
+    }
 
 
 def test_dependencies_can_be_overridden(app_with_probe_route):
