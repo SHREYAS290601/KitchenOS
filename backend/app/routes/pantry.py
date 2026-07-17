@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.deps import get_db
+from backend.app.deps import DevUser, get_current_user, get_db
 from backend.app.models.pantry_item import SOURCED_FIELD_COLUMNS, PantryItem
 from backend.app.pantry.quantity import QuantityError
 from backend.app.schemas.sourced_field import EvidenceSource, FieldStatus, SourcedField
@@ -33,16 +33,29 @@ def _serialize(item: PantryItem) -> dict:
     }
 
 
-def _get_item(db: Session, item_id: UUID) -> PantryItem:
-    item = db.get(PantryItem, item_id)
+def _get_item(db: Session, item_id: UUID, user_id: UUID) -> PantryItem:
+    item = db.scalar(
+        select(PantryItem).where(
+            PantryItem.pantry_item_id == item_id,
+            PantryItem.user_id == user_id,
+        )
+    )
     if item is None:
         raise HTTPException(status_code=404, detail=f"pantry item {item_id} not found")
     return item
 
 
 @router.get("/items")
-def list_items(status: str | None = None, db: Session = Depends(get_db)) -> dict:
-    query = select(PantryItem).order_by(PantryItem.created_at)
+def list_items(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    user: DevUser = Depends(get_current_user),
+) -> dict:
+    query = (
+        select(PantryItem)
+        .where(PantryItem.user_id == user.user_id)
+        .order_by(PantryItem.created_at)
+    )
     if status is not None:
         query = query.where(PantryItem.status == status)
     items = db.execute(query).scalars().all()
@@ -50,8 +63,12 @@ def list_items(status: str | None = None, db: Session = Depends(get_db)) -> dict
 
 
 @router.get("/items/{item_id}")
-def get_item(item_id: UUID, db: Session = Depends(get_db)) -> dict:
-    return _serialize(_get_item(db, item_id))
+def get_item(
+    item_id: UUID,
+    db: Session = Depends(get_db),
+    user: DevUser = Depends(get_current_user),
+) -> dict:
+    return _serialize(_get_item(db, item_id, user.user_id))
 
 
 class QuantityUpdate(BaseModel):
@@ -62,9 +79,12 @@ class QuantityUpdate(BaseModel):
 
 @router.post("/items/{item_id}/quantity")
 def update_quantity(
-    item_id: UUID, payload: QuantityUpdate, db: Session = Depends(get_db)
+    item_id: UUID,
+    payload: QuantityUpdate,
+    db: Session = Depends(get_db),
+    user: DevUser = Depends(get_current_user),
 ) -> dict:
-    item = _get_item(db, item_id)
+    item = _get_item(db, item_id, user.user_id)
     item.quantity_type = payload.quantity_type
     incoming = SourcedField(
         value=payload.quantity_value,
@@ -90,8 +110,9 @@ class FieldAction(BaseModel):
 def field_action(
     item_id: UUID, field_name: str, payload: FieldAction,
     db: Session = Depends(get_db),
+    user: DevUser = Depends(get_current_user),
 ) -> dict:
-    item = _get_item(db, item_id)
+    item = _get_item(db, item_id, user.user_id)
     if field_name not in SOURCED_FIELD_COLUMNS:
         raise HTTPException(
             status_code=404,

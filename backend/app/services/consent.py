@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -45,6 +46,11 @@ def grant(
     row = _find(db, user_id) or ConsentRecord(user_id=user_id)
     row.state = state
     row.session_id = session_id if state == ConsentState.granted_for_session else None
+    row.session_expires_at = (
+        datetime.now(timezone.utc) + timedelta(hours=8)
+        if state == ConsentState.granted_for_session
+        else None
+    )
     row.retention_policy = retention_policy
     row.single_image_consumed = False
     db.add(row)
@@ -56,6 +62,7 @@ def revoke(db: Session, user_id: uuid.UUID) -> ConsentRecord:
     row = _find(db, user_id) or ConsentRecord(user_id=user_id)
     row.state = ConsentState.revoked
     row.session_id = None
+    row.session_expires_at = None
     db.add(row)
     db.commit()
     return row
@@ -69,7 +76,12 @@ def check_can_store(db: Session, user_id: uuid.UUID, session_id: str | None) -> 
     if state == ConsentState.always_granted:
         return True
     if state == ConsentState.granted_for_session:
-        return bool(session_id and row.session_id == session_id)
+        return bool(
+            session_id
+            and row.session_id == session_id
+            and row.session_expires_at
+            and row.session_expires_at > datetime.now(timezone.utc)
+        )
     if state == ConsentState.granted_for_single_image:
         return not row.single_image_consumed
     return False

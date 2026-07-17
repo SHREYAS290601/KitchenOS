@@ -1,5 +1,7 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.models.consent import ConsentRecord, ConsentState, RetentionPolicy
@@ -24,9 +26,15 @@ def store_image(
     retention_policy: RetentionPolicy,
     related_item_candidate: str | None = None,
 ) -> ImageEvidenceRecord:
-    if not check_can_store(db, user_id, shopping_session_id):
+    consent = db.scalar(
+        select(ConsentRecord)
+        .where(ConsentRecord.user_id == user_id)
+        .with_for_update()
+    )
+    if consent is None or not check_can_store(db, user_id, shopping_session_id):
         raise ConsentRequired("image storage requires an active consent grant")
-    consent = db.query(ConsentRecord).filter_by(user_id=user_id).one()
+    if RetentionPolicy(consent.retention_policy) != retention_policy:
+        raise ConsentRequired("image retention must match the active consent choice")
     uri = store.put_image(image_bytes, content_type=content_type)
     active = capture_context == "while_shopping_query"
     record = ImageEvidenceRecord(
@@ -39,6 +47,11 @@ def store_image(
         consent_status=consent.state,
         retention_policy=retention_policy,
         stored_for_future_enrichment=active and retention_policy != RetentionPolicy.delete_after_answer,
+        retention_due_at=(
+            datetime.now(timezone.utc) + timedelta(hours=1)
+            if not active and retention_policy == RetentionPolicy.delete_after_enrichment
+            else None
+        ),
     )
     db.add(record)
     consume_single_image_grant(db, consent)

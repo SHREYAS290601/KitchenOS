@@ -42,7 +42,11 @@ def confirm_item(
     db: Session,
     shopping_list_id: uuid.UUID,
     shopping_item_id: uuid.UUID,
+    user_id: uuid.UUID,
 ) -> ConfirmResult:
+    shopping_list = db.get(ShoppingList, shopping_list_id)
+    if shopping_list is None or shopping_list.user_id != user_id:
+        raise ItemNotFound(f"shopping list {shopping_list_id} not found")
     item = db.get(ShoppingItem, shopping_item_id)
     if item is None or item.shopping_list_id != shopping_list_id:
         raise ItemNotFound(f"shopping item {shopping_item_id} not found in this list")
@@ -54,8 +58,6 @@ def confirm_item(
         raise AlreadyConfirmed(
             f"{item.canonical_name} was already confirmed — cross-off happens once"
         )
-
-    shopping_list = db.get(ShoppingList, shopping_list_id)
 
     event = ShoppingConfirmationEvent(
         shopping_item_id=item.shopping_item_id,

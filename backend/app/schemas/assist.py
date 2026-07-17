@@ -9,7 +9,6 @@ class AssistRequest(BaseModel):
     question: str
     image_id: uuid.UUID | None = None
     shopping_session_id: str | None = None
-    user_id: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 class AssistResponse(BaseModel):

@@ -7,7 +7,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.deps import get_db
+from backend.app.deps import get_current_user, get_db
 from backend.app.main import create_app
 from backend.app.models.pantry_item import PantryItem
 from backend.app.models.shopping_item import ShoppingItem
@@ -15,6 +15,10 @@ from backend.app.models.shopping_list import ShoppingList
 from backend.app.schemas.sourced_field import EvidenceSource, FieldStatus, SourcedField
 
 USER_ID = uuid.uuid4()
+
+
+class FakeUser:
+    user_id = USER_ID
 
 
 @pytest.fixture
@@ -34,6 +38,7 @@ def client(tables, db, monkeypatch):
     monkeypatch.setenv("PANTRYOPS_REDIS_URL", "redis://localhost:6379/0")
     app = create_app()
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: FakeUser()
     return TestClient(app)
 
 
@@ -80,7 +85,6 @@ def beef_history(db, tables) -> ShoppingItem:
 
 
 BODY = {
-    "user_id": str(USER_ID),
     "goal": "weekly groceries",
     "cuisine_preferences": ["Indian", "Mexican"],
     "dietary_restrictions": [],
@@ -123,3 +127,12 @@ def test_create_list_respects_dietary_restrictions(client, db, low_milk, beef_hi
     for item in restricted.json()["items"]:
         assert "beef" not in item["canonical_name"].lower()
         assert "beef" not in item["category"].lower()
+
+
+def test_create_list_rejects_client_supplied_identity(client):
+    response = client.post(
+        "/shopping-lists",
+        json={**BODY, "user_id": str(uuid.uuid4())},
+    )
+
+    assert response.status_code == 422

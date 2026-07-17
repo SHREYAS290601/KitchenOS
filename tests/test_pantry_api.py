@@ -3,11 +3,17 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.deps import get_db
+from backend.app.deps import get_current_user, get_db
 from backend.app.main import create_app
 from backend.app.models.pantry_item import PantryItem
 from backend.app.schemas.sourced_field import EvidenceSource, FieldStatus, SourcedField
 from backend.app.services.ledger import apply_update
+
+USER_ID = uuid.uuid4()
+
+
+class FakeUser:
+    user_id = USER_ID
 
 
 @pytest.fixture
@@ -27,6 +33,7 @@ def client(tables, db, monkeypatch):
     monkeypatch.setenv("PANTRYOPS_REDIS_URL", "redis://localhost:6379/0")
     app = create_app()
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: FakeUser()
     return TestClient(app)
 
 
@@ -39,7 +46,7 @@ def sf(value, source=EvidenceSource.label_ocr, confidence=0.84,
 @pytest.fixture
 def stored_item(db, tables) -> PantryItem:
     item = PantryItem(
-        user_id=uuid.uuid4(),
+        user_id=USER_ID,
         canonical_name=sf("milk", EvidenceSource.checklist_cross_off, 1.0,
                           FieldStatus.user_confirmed),
         brand=sf("Chobani"),
@@ -52,7 +59,7 @@ def stored_item(db, tables) -> PantryItem:
 
 
 def test_list_items_filters_by_status(client, db, tables, stored_item):
-    other = PantryItem(user_id=uuid.uuid4(), quantity_type="count", status="planned")
+    other = PantryItem(user_id=USER_ID, quantity_type="count", status="planned")
     db.add(other)
     db.commit()
 
@@ -77,6 +84,18 @@ def test_get_missing_item_404(client):
     assert client.get(f"/pantry/items/{uuid.uuid4()}").status_code == 404
 
 
+def test_foreign_item_is_hidden_from_reads_and_mutations(client, db):
+    item = PantryItem(user_id=uuid.uuid4(), quantity_type="count", status="stored")
+    db.add(item)
+    db.commit()
+
+    assert client.get(f"/pantry/items/{item.pantry_item_id}").status_code == 404
+    assert client.post(
+        f"/pantry/items/{item.pantry_item_id}/quantity",
+        json={"quantity_type": "count", "quantity_value": 1, "source": "user_manual_update"},
+    ).status_code == 404
+
+
 def test_quantity_update_applies_user_confirmed(client, stored_item):
     r = client.post(
         f"/pantry/items/{stored_item.pantry_item_id}/quantity",
@@ -90,7 +109,7 @@ def test_quantity_update_applies_user_confirmed(client, stored_item):
 
 
 def test_quantity_update_422_on_bucket_for_count(client, db, tables):
-    item = PantryItem(user_id=uuid.uuid4(), quantity_type="count", status="stored")
+    item = PantryItem(user_id=USER_ID, quantity_type="count", status="stored")
     db.add(item)
     db.commit()
 

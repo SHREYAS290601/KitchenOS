@@ -7,7 +7,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.deps import get_db
+from backend.app.deps import get_current_user, get_db
 from backend.app.main import create_app
 from backend.app.models.ledger_change_log import LedgerChangeLog
 from backend.app.models.pantry_item import PantryItem
@@ -15,6 +15,10 @@ from backend.app.models.shopping_item import ShoppingItem
 from backend.app.models.shopping_list import ShoppingList
 
 USER_ID = uuid.uuid4()
+
+
+class FakeUser:
+    user_id = USER_ID
 
 
 @pytest.fixture
@@ -34,6 +38,7 @@ def client(tables, db, monkeypatch):
     monkeypatch.setenv("PANTRYOPS_REDIS_URL", "redis://localhost:6379/0")
     app = create_app()
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: FakeUser()
     return TestClient(app)
 
 

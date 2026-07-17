@@ -25,3 +25,7 @@ class ImageEvidenceRecord(Base):
     retention_policy: Mapped[str] = mapped_column(String, nullable=False)
     stored_for_future_enrichment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    retention_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

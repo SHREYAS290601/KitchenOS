@@ -9,6 +9,10 @@ TEST_DATABASE_URL = os.environ.get(
     "PANTRYOPS_TEST_DATABASE_URL",
     "postgresql+psycopg://pantryops:pantryops@localhost:5432/pantryops",
 )
+os.environ.setdefault("PANTRYOPS_DATABASE_URL", TEST_DATABASE_URL)
+os.environ.setdefault("PANTRYOPS_REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("PANTRYOPS_API_TOKEN", "test-api-token-with-minimum-32-chars")
+os.environ.setdefault("PANTRYOPS_USER_ID", "00000000-0000-0000-0000-000000000001")
 
 
 @pytest.fixture(scope="session")
@@ -19,6 +23,24 @@ def engine():
         conn.execute(text('CREATE SCHEMA pantryops'))
     yield eng
     eng.dispose()
+
+
+@pytest.fixture(autouse=True)
+def eager_celery():
+    from backend.app.workers.celery_app import celery
+
+    previous = {
+        "task_always_eager": celery.conf.task_always_eager,
+        "task_eager_propagates": celery.conf.task_eager_propagates,
+        "task_store_eager_result": celery.conf.task_store_eager_result,
+    }
+    celery.conf.update(
+        task_always_eager=True,
+        task_eager_propagates=True,
+        task_store_eager_result=False,
+    )
+    yield celery
+    celery.conf.update(**previous)
 
 
 @pytest.fixture

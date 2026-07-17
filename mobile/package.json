@@ -8,8 +8,11 @@
     "expo-camera": "~57.0.2",
     "expo-constants": "~57.0.3",
     "expo-dev-client": "~57.0.6",
+    "expo-image-manipulator": "~57.0.4",
+    "expo-image-picker": "~57.0.4",
     "expo-linking": "~57.0.3",
     "expo-router": "~57.0.6",
+    "expo-secure-store": "~57.0.1",
     "expo-status-bar": "~57.0.1",
     "expo-updates": "~57.0.7",
     "react": "19.2.3",
@@ -36,7 +39,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "test": "jest"
+    "test": "jest",
+    "test:coverage:phase5": "jest --runInBand __tests__/CheckInScreen.test.tsx --coverage --collectCoverageFrom=screens/CheckInScreen.tsx --coverageThreshold='{\"global\":{\"branches\":80,\"functions\":80,\"lines\":80,\"statements\":80}}'"
   },
   "private": true,
   "jest": {

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.config import Settings
 from backend.app.db import make_engine, make_session_factory
-from backend.app.routes import assist, consent, consumption, health, images, pantry, shopping
+from backend.app.routes import assist, checkin, consent, consumption, health, images, pantry, shopping
 from backend.app.storage import make_object_store
 
 
@@ -30,5 +30,6 @@ def create_app() -> FastAPI:
     app.include_router(images.router)
     app.include_router(assist.router)
     app.include_router(consumption.router)
+    app.include_router(checkin.router)
 
     return app

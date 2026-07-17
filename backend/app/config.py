@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Literal
+import uuid
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +11,8 @@ class Settings(BaseSettings):
 
     database_url: str
     redis_url: str
+    api_token: SecretStr = Field(min_length=32)
+    user_id: uuid.UUID
     storage_backend: Literal["local", "minio", "s3"] = "local"
     storage_path: Path = Path("data/user_uploads")
     s3_endpoint_url: str | None = None

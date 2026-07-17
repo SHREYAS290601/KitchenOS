@@ -50,7 +50,7 @@ Workers stay thin: they load context, call `services/` functions, persist, updat
 - Create: `backend/app/workers/__init__.py`, `backend/app/workers/celery_app.py`
 - Test: `tests/test_pipeline_stubs.py` (start)
 
-- [ ] **Step 1: Write the failing test** — `tests/test_pipeline_stubs.py`:
+- [x] **Step 1: Write the failing test** — `tests/test_pipeline_stubs.py`:
 
 ```python
 from backend.app.workers.celery_app import celery, make_celery
@@ -73,13 +73,13 @@ def test_eager_mode_runs_inline():
     assert add.delay(2, 3).get() == 5
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_pipeline_stubs.py -v` → FAIL (ImportError).
+- [x] **Step 2: Run to verify it fails** — `uv run pytest tests/test_pipeline_stubs.py -v` → FAIL (ImportError).
 
-- [ ] **Step 3: Implement `celery_app.py`** — `make_celery()` reads `Settings`, sets broker + result backend to `redis_url`, `task_serializer="json"`, and exposes a module-level `celery` instance. Test fixture in `conftest.py` sets `task_always_eager = True` and `task_eager_propagates = True` for the whole suite.
+- [x] **Step 3: Implement `celery_app.py`** — `make_celery()` reads `Settings`, sets broker + result backend to `redis_url`, `task_serializer="json"`, and exposes a module-level `celery` instance. Test fixture in `conftest.py` sets `task_always_eager = True` and `task_eager_propagates = True` for the whole suite.
 
-- [ ] **Step 4: Run to verify it passes.**
+- [x] **Step 4: Run to verify it passes.**
 
-- [ ] **Step 5: Commit** — `feat(workers): celery app configured from settings with eager test mode`
+- [x] **Step 5: Commit** — `feat(workers): celery app configured from settings with eager test mode`
 
 ---
 
@@ -89,15 +89,15 @@ def test_eager_mode_runs_inline():
 - Create: `backend/app/models/background_job.py`, migration
 - Test: `tests/test_job_model.py`
 
-- [ ] **Step 1: Write the failing test** — round-trip a job with `job_type="grocery_image_check_in"`, `status="queued"`, `image_ids=["img_001","img_002"]` (JSONB), and the five-step `steps` array from `data-models.md` §4.12; assert `completed_at is None` and `error is None`; assert an invalid `status` value is rejected by the model's enum/check constraint.
+- [x] **Step 1: Write the failing test** — round-trip a job with `job_type="grocery_image_check_in"`, `status="queued"`, `image_ids=["img_001","img_002"]` (JSONB), and the five-step `steps` array from `data-models.md` §4.12; assert `completed_at is None` and `error is None`; assert an invalid `status` value is rejected by the model's enum/check constraint.
 
-- [ ] **Step 2: Run to verify it fails** — FAIL (ImportError).
+- [x] **Step 2: Run to verify it fails** — FAIL (ImportError).
 
-- [ ] **Step 3: Implement the model** — columns per `data-models.md` §4.12: UUID PK, `job_type`, `status` (enum: `queued | processing | completed | failed | needs_review`), `user_id`, `image_ids` JSONB, `steps` JSONB (list of `{step, status}`), timestamps, `error`. Helper methods `set_step_status(step, status)` and `all_steps_completed()`. Generate + hand-review the Alembic migration.
+- [x] **Step 3: Implement the model** — columns per `data-models.md` §4.12: UUID PK, `job_type`, `status` (enum: `queued | processing | completed | failed | needs_review`), `user_id`, `image_ids` JSONB, `steps` JSONB (list of `{step, status}`), timestamps, `error`. Helper methods `set_step_status(step, status)` and `all_steps_completed()`. Generate + hand-review the Alembic migration.
 
-- [ ] **Step 4: Run to verify it passes** — includes `uv run pytest tests/test_migrations.py -v` (parity test from Phase 1 still green).
+- [x] **Step 4: Run to verify it passes** — includes `uv run pytest tests/test_migrations.py -v` (parity test from Phase 1 still green).
 
-- [ ] **Step 5: Commit** — `feat(checkin): durable background job model with per-step status`
+- [x] **Step 5: Commit** — `feat(checkin): durable background job model with per-step status`
 
 ---
 
@@ -110,7 +110,7 @@ This is the durability core of the phase: the job row and the enqueue intent com
 - Modify: `backend/app/main.py` (mount router)
 - Test: `tests/test_checkin_api.py`
 
-- [ ] **Step 1: Write the failing tests** — `tests/test_checkin_api.py`:
+- [x] **Step 1: Write the failing tests** — `tests/test_checkin_api.py`:
 
 ```python
 def test_checkin_creates_job_and_links_images(client, db, consented_images):
@@ -140,13 +140,13 @@ def test_job_status_endpoint_returns_steps(client, db, queued_job):
     assert [s["step"] for s in r.json()["steps"]][0] == "image_storage"
 ```
 
-- [ ] **Step 2: Run to verify they fail** — FAIL (404, routes don't exist).
+- [x] **Step 2: Run to verify they fail** — FAIL (404, routes don't exist).
 
-- [ ] **Step 3: Implement** — `services/checkin.py::create_check_in(db, user, request)`: validates images exist and belong to the user, writes the `BackgroundJob` row, flushes, and registers the Celery enqueue as an after-commit hook (SQLAlchemy `event.listens_for(session, "after_commit")` or equivalent) so **the row commits with the request and the enqueue only fires on successful commit**. Route returns 202 with `job_id` + initial steps. `GET /jobs/{job_id}` serializes the job row (the durable truth — never Celery state).
+- [x] **Step 3: Implement** — `services/checkin.py::create_check_in(db, user, request)`: validates images exist and belong to the user, writes the `BackgroundJob` row, flushes, and registers the Celery enqueue as an after-commit hook (SQLAlchemy `event.listens_for(session, "after_commit")` or equivalent) so **the row commits with the request and the enqueue only fires on successful commit**. Route returns 202 with `job_id` + initial steps. `GET /jobs/{job_id}` serializes the job row (the durable truth — never Celery state).
 
-- [ ] **Step 4: Run to verify they pass.**
+- [x] **Step 4: Run to verify they pass.**
 
-- [ ] **Step 5: Commit** — `feat(checkin): check-in endpoint with transactional job creation and status route`
+- [x] **Step 5: Commit** — `feat(checkin): check-in endpoint with transactional job creation and status route`
 
 ---
 
@@ -156,15 +156,15 @@ def test_job_status_endpoint_returns_steps(client, db, queued_job):
 - Modify: `backend/app/services/checkin.py`
 - Test: `tests/test_checkin_consent.py`
 
-- [ ] **Step 1: Write the failing tests** — check-in with images whose `consent_status` is `denied` or `not_requested` → 403 with a detail naming the offending image; check-in with `granted_for_session` and `always_granted` → 202; the worker-side guard (Task 6) re-asserts consent before processing and marks the job `failed` with a consent error if it changed to `revoked` between request and execution.
+- [x] **Step 1: Write the failing tests** — check-in with images whose `consent_status` is `denied` or `not_requested` → 403 with a detail naming the offending image; check-in with `granted_for_session` and `always_granted` → 202; the worker-side guard (Task 6) re-asserts consent before processing and marks the job `failed` with a consent error if it changed to `revoked` between request and execution.
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — `services/checkin.py` asserts `consent_status ∈ {granted_for_single_image, granted_for_session, always_granted}` per image (invariant 4); the same predicate is exported as `consent_allows_processing(image)` for the worker.
+- [x] **Step 3: Implement** — `services/checkin.py` asserts `consent_status ∈ {granted_for_session, always_granted}` per image (invariant 4); the same predicate is exported as `consent_allows_processing(image)` for the worker. Single-image consent remains active-answer-only and never authorizes silent enrichment.
 
-- [ ] **Step 4: Run to verify they pass.**
+- [x] **Step 4: Run to verify they pass.**
 
-- [ ] **Step 5: Commit** — `feat(checkin): consent enforced at endpoint and exported for worker re-check`
+- [x] **Step 5: Commit** — `feat(checkin): consent enforced at endpoint and exported for worker re-check`
 
 ---
 
@@ -174,13 +174,13 @@ def test_job_status_endpoint_returns_steps(client, db, queued_job):
 - Create: `backend/app/agents/mobile_check_in.py`
 - Test: append to `tests/test_checkin_api.py`
 
-- [ ] **Step 1: Write the failing tests** — the agent's `run(context)` with zero images raises/refuses (`must not run without user-provided images`); with valid images returns `{job_id, status: "processing_in_background"}` and its output text never contains a product identity claim (assert response schema has no `brand`/`product_name` fields — §15.5 "must not claim final identity immediately").
+- [x] **Step 1: Write the failing tests** — the agent's `run(context)` with zero images raises/refuses (`must not run without user-provided images`); with valid images returns `{job_id, status: "processing_in_background"}` and its output text never contains a product identity claim (assert response schema has no `brand`/`product_name` fields — §15.5 "must not claim final identity immediately").
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — thin agent class delegating to `services/checkin.py`; returns typed proposal only.
+- [x] **Step 3: Implement** — thin agent class delegating to `services/checkin.py`; returns typed proposal only.
 
-- [ ] **Step 4: Verify pass. Commit** — `feat(agents): mobile check-in agent with no-identity-claim output`
+- [x] **Step 4: Verify pass. Commit** — `feat(agents): mobile check-in agent with no-identity-claim output`
 
 ---
 
@@ -190,13 +190,13 @@ def test_job_status_endpoint_returns_steps(client, db, queued_job):
 - Create: `backend/app/workers/steps.py`
 - Test: append to `tests/test_pipeline_stubs.py`
 
-- [ ] **Step 1: Write the failing tests** — for each of `segmentation_step`, `object_detection_step`, `ocr_step`, `barcode_step`, `product_enrichment_step`: running the task (eager) transitions that step's status `queued → completed` on the job row and leaves the others untouched; a step that raises marks its step `failed` and the job `failed` with the error recorded; every step calls `consent_allows_processing` first and aborts the job cleanly on revoked consent.
+- [x] **Step 1: Write the failing tests** — for each of `segmentation_step`, `object_detection_step`, `ocr_step`, `barcode_step`, `product_enrichment_step`: running the task (eager) transitions that step's status `queued → completed` on the job row and leaves the others untouched; a step that raises marks its step `failed` and the job `failed` with the error recorded; every step calls `consent_allows_processing` first and aborts the job cleanly on revoked consent.
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — five Celery tasks, each: load job, re-check consent, set step `processing`, do stub work (return an empty typed result), set step `completed`. Shared `@job_step("ocr")` decorator handles load/status/error bookkeeping so the stubs are one line of body each — Phase 6 replaces only the body.
+- [x] **Step 3: Implement** — five Celery tasks, each: load job, re-check consent, set step `processing`, do stub work (return an empty typed result), set step `completed`. Shared `@job_step("ocr")` decorator handles load/status/error bookkeeping so the stubs are one line of body each — Phase 6 replaces only the body.
 
-- [ ] **Step 4: Verify pass. Commit** — `feat(workers): stub pipeline steps with per-step status bookkeeping`
+- [x] **Step 4: Verify pass. Commit** — `feat(workers): stub pipeline steps with per-step status bookkeeping`
 
 ---
 
@@ -206,13 +206,13 @@ def test_job_status_endpoint_returns_steps(client, db, queued_job):
 - Create: `backend/app/workers/pipeline.py`, `backend/app/agents/background_enrichment.py`
 - Test: append to `tests/test_pipeline_stubs.py`
 
-- [ ] **Step 1: Write the failing tests** — `run_check_in_pipeline(job_id)` (eager) moves the job `queued → processing → completed` with steps completing **in manifest §7 order** (segmentation → detection → OCR → barcode → enrichment); the Background Enrichment Agent, given a stub candidate for a field whose stored status is `user_confirmed`, files it as `conflicting` via `apply_update()` and never applies it (invariant 3); nothing in the run marks any estimated field as confirmed.
+- [x] **Step 1: Write the failing tests** — `run_check_in_pipeline(job_id)` (eager) moves the job `queued → processing → completed` with steps completing **in manifest §7 order** (segmentation → detection → OCR → barcode → enrichment); the Background Enrichment Agent, given a stub candidate for a field whose stored status is `user_confirmed`, files it as `conflicting` via `apply_update()` and never applies it (invariant 3); nothing in the run marks any estimated field as confirmed.
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — `pipeline.py::run_check_in_pipeline` builds `chain(segmentation_step.si(job_id), …, product_enrichment_step.si(job_id))`; final link flips job status. `background_enrichment.py` consumes step outputs and routes every candidate through `apply_update()` with `source="silent_check_in"`, flagging low-confidence fields `needs_user_review` (§15.6).
+- [x] **Step 3: Implement** — `pipeline.py::run_check_in_pipeline` builds `chain(segmentation_step.si(job_id), …, product_enrichment_step.si(job_id))`; final link flips job status. `background_enrichment.py` consumes step outputs and routes every candidate through `apply_update()` with `source="silent_check_in"`, flagging low-confidence fields `needs_user_review` (§15.6).
 
-- [ ] **Step 4: Verify pass. Commit** — `feat(workers): ordered check-in chain with estimates-only enrichment agent`
+- [x] **Step 4: Verify pass. Commit** — `feat(workers): ordered check-in chain with estimates-only enrichment agent`
 
 ---
 
@@ -222,13 +222,13 @@ def test_job_status_endpoint_returns_steps(client, db, queued_job):
 - Modify: `backend/app/workers/pipeline.py`
 - Test: append to `tests/test_checkin_consent.py`
 
-- [ ] **Step 1: Write the failing tests** — after a completed job, an image with `retention_policy="delete_after_enrichment"` is deleted from storage and its row marked deleted; `keep_for_pantry_memory` images survive; `delete_after_answer` images from Phase 4 active queries are swept too.
+- [x] **Step 1: Write the failing tests** — after a completed job, an image with `retention_policy="delete_after_enrichment"` is deleted from storage and its row marked deleted; `keep_for_pantry_memory` images survive; `delete_after_answer` images from Phase 4 active queries are swept too.
 
-- [ ] **Step 2: Run to verify they fail.**
+- [x] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement** — `enforce_retention` Celery task registered on beat (hourly) and also invoked as the pipeline's final link; deletes via the `storage/` abstraction only.
+- [x] **Step 3: Implement** — `enforce_retention` Celery task registered on beat (hourly) and also invoked as the pipeline's final link; deletes via the `storage/` abstraction only.
 
-- [ ] **Step 4: Verify pass. Commit** — `feat(workers): retention enforcement task honoring per-image policy`
+- [x] **Step 4: Verify pass. Commit** — `feat(workers): retention enforcement task honoring per-image policy`
 
 ---
 
@@ -238,13 +238,13 @@ def test_job_status_endpoint_returns_steps(client, db, queued_job):
 - Create: `mobile/screens/CheckInScreen.tsx`
 - Test: `mobile/__tests__/CheckInScreen.test.tsx`
 
-- [ ] **Step 1: Write the failing tests** — multi-photo picker renders with an accessible label ("Add grocery photos"); submitting with photos calls the client's `postCheckIn` and shows "Processing in background — you can keep using the app" in a live region (`accessibilityLiveRegion="polite"`); job status polling renders each step's name + status as text (never color alone); zero-photo submit is blocked with an error message naming the field.
+- [x] **Step 1: Write the failing tests** — multi-photo picker renders with an accessible label ("Add grocery photos"); submitting with photos calls the client's `postCheckIn` and shows "Processing in background — you can keep using the app" in a live region (`accessibilityLiveRegion="polite"`); job status polling renders each step's name + status as text (never color alone); zero-photo submit is blocked with an error message naming the field.
 
-- [ ] **Step 2: Run to verify they fail** — `npx jest mobile/__tests__/CheckInScreen.test.tsx` → FAIL.
+- [x] **Step 2: Run to verify they fail** — `npx jest mobile/__tests__/CheckInScreen.test.tsx` → FAIL.
 
-- [ ] **Step 3: Implement** — Expo image picker (multi-select), typed client calls, polled `GET /jobs/{id}` with backoff, all controls keyboard-reachable with visible focus.
+- [x] **Step 3: Implement** — Expo image picker (multi-select), typed client calls, polled `GET /jobs/{id}` with backoff, all controls keyboard-reachable with visible focus.
 
-- [ ] **Step 4: Verify pass. Commit** — `feat(mobile): accessible check-in screen with background status polling`
+- [x] **Step 4: Verify pass. Commit** — `feat(mobile): accessible check-in screen with background status polling`
 
 ---
 

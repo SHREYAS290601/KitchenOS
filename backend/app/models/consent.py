@@ -36,6 +36,7 @@ class ConsentRecord(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     state: Mapped[str] = mapped_column(String, nullable=False, default=ConsentState.not_requested)
     session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    session_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     retention_policy: Mapped[str] = mapped_column(String, nullable=False, default=RetentionPolicy.delete_after_answer)
     single_image_consumed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)

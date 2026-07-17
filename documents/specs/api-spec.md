@@ -52,7 +52,7 @@ Answers from preferences + shopping list + pantry ledger + optional image. Respo
 
 ### POST /images — upload an image (active or check-in)
 
-Multipart upload + metadata (`capture_context`, `shopping_session_id`). Refused (403) unless the user's consent state allows storage. Returns 201 with `image_id` and the recorded `consent_status` / `retention_policy`.
+Authenticated multipart upload + metadata (`capture_context`, `shopping_session_id`). Only decoded JPEG and PNG images up to 10 MiB and 4096×4096 are accepted; the server re-encodes uploads to strip metadata. Refused (403) unless the user's unexpired consent state allows storage. Returns 201 with `image_id` and the recorded `consent_status` / `retention_policy`.
 
 ### POST /check-in/groceries — post-shopping silent check-in
 
@@ -64,11 +64,11 @@ Multipart upload + metadata (`capture_context`, `shopping_session_id`). Refused 
 }
 ```
 
-Creates the `BackgroundJob` row and enqueues the Celery chain **in one transaction**. Returns 202 with `job_id` and initial step statuses. 403 without consent; 422 with zero images (silent mode never runs without user-provided photos).
+Creates the durable `BackgroundJob` row in the request transaction, then publishes the Celery chain after commit. A periodic relay recovers committed jobs if publication fails. Returns 202 with `job_id` and initial step statuses. 403 without valid session consent; 422 with zero images (silent mode never runs without user-provided photos).
 
 ### GET /jobs/{job_id} — job status
 
-Returns the `BackgroundJob` row: overall status plus per-step status, for the mobile status screen (polled; rendered in an `aria-live` region).
+Returns the authenticated user's `BackgroundJob` row: overall status plus per-step status, for the mobile status screen (polled with capped backoff; rendered in an `aria-live` region).
 
 ## Vision (`routes/vision.py`)
 

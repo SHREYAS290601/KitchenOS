@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from typing import Literal
 
-from backend.app.deps import get_db
+from backend.app.deps import DevUser, get_current_user, get_db
 from backend.app.models.shopping_item import ShoppingItem
 from backend.app.schemas.shopping import (
     ShoppingItemResponse,
@@ -35,8 +35,12 @@ def _serialize(db: Session, shopping_list) -> ShoppingListResponse:
 
 
 @router.post("", response_model=ShoppingListResponse, status_code=201)
-def create_list(payload: ShoppingListCreate, db: Session = Depends(get_db)) -> ShoppingListResponse:
-    shopping_list = create_shopping_list(db, payload)
+def create_list(
+    payload: ShoppingListCreate,
+    db: Session = Depends(get_db),
+    user: DevUser = Depends(get_current_user),
+) -> ShoppingListResponse:
+    shopping_list = create_shopping_list(db, payload, user.user_id)
     return _serialize(db, shopping_list)
 
 
@@ -50,9 +54,10 @@ def confirm(
     item_id: uuid.UUID,
     payload: ConfirmRequest,
     db: Session = Depends(get_db),
+    user: DevUser = Depends(get_current_user),
 ) -> dict:
     try:
-        result = confirm_item(db, list_id, item_id)
+        result = confirm_item(db, list_id, item_id, user.user_id)
     except ItemNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except AlreadyConfirmed as exc:
