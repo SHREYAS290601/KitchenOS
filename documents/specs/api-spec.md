@@ -59,12 +59,13 @@ Authenticated multipart upload + metadata (`capture_context`, `shopping_session_
 ```json
 {
   "shopping_session_id": "session_001",
+  "shopping_list_id": "list_001",
   "image_ids": ["img_001", "img_002"],
   "processing_mode": "silent_background_enrichment"
 }
 ```
 
-Creates the durable `BackgroundJob` row in the request transaction, then publishes the Celery chain after commit. A periodic relay recovers committed jobs if publication fails. Returns 202 with `job_id` and initial step statuses. 403 without valid session consent; 422 with zero images (silent mode never runs without user-provided photos).
+`shopping_list_id` is optional, but when supplied it must belong to the authenticated user and is the only automatic path from image evidence to purchased checklist items. Creates the durable `BackgroundJob` row in the request transaction, then publishes the Celery chain after commit. A periodic relay recovers committed jobs if publication fails. Returns 202 with `job_id` and initial step statuses. 403 without valid session consent; 422 with zero images (silent mode never runs without user-provided photos).
 
 ### GET /jobs/{job_id} — job status
 
@@ -81,7 +82,13 @@ Returns the authenticated user's `BackgroundJob` row: overall status plus per-st
 }
 ```
 
-Runs the appropriate vision path and returns detections / OCR fields / barcode value as **estimates with confidence** — this endpoint never writes the ledger directly.
+Requires authenticated ownership of an undeleted image and current processing consent.
+Runs the appropriate bounded vision path and returns typed detections, OCR fields, and
+barcode evidence as estimates with source, status, and confidence where the engine
+provides calibrated confidence. Evidence rows may be persisted idempotently, but this
+endpoint never writes the ledger or resolves an ambiguous pantry target. The route is
+rate-limited and returns typed timeout/model-unavailable errors without exposing raw
+model exceptions, storage URIs, or filesystem paths.
 
 ## Pantry (`routes/pantry.py`)
 

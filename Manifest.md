@@ -420,16 +420,17 @@ Silent processing should:
 
 1. store uploaded grocery images;
 2. create background enrichment job;
-3. segment individual products;
-4. detect item categories;
+3. detect item categories and bounding boxes;
+4. segment or crop the detected product regions;
 5. crop labels/product regions;
 6. run OCR on labels and packages;
 7. detect barcodes when visible;
 8. estimate quantities;
 9. use APIs or web sources for product/nutrition details;
-10. create or update pantry records as editable estimates;
-11. flag low-confidence records for review;
-12. avoid interrupting user unless review is needed.
+10. resolve evidence only through explicit shopping-list purchase context;
+11. create or update pantry records as editable estimates when the target is unambiguous;
+12. persist ambiguous or unmatched candidates for review;
+13. avoid interrupting user unless review is needed.
 
 ### Silent Check-In Pipeline
 
@@ -440,9 +441,9 @@ Images stored with consent
         ↓
 Background job created
         ↓
-Segmentation Agent separates product regions
-        ↓
 Object Detection Agent identifies grocery categories
+        ↓
+Segmentation Agent separates or crops detected product regions
         ↓
 OCR Agent extracts label/package text
         ↓
@@ -450,9 +451,9 @@ Barcode Agent checks visible barcodes
         ↓
 Product Enrichment Agent queries APIs/sources
         ↓
-Candidate pantry records created or updated
+Candidates resolved through checklist purchase context
         ↓
-Field-level values stored as estimates
+Resolved field values stored as estimates; ambiguous evidence retained for review
         ↓
 Auditor flags conflicts or low-confidence fields
         ↓
@@ -1014,13 +1015,22 @@ product_review
   "capture_context": "post_shopping_check_in",
   "processing_mode": "silent_background_enrichment",
   "linked_shopping_session_id": "session_001",
+  "shopping_list_id": "list_001",
   "related_item_candidate": null,
   "storage_uri": "s3://bucket/img_001.jpg",
+  "content_sha256": "sha256-of-canonical-reencoded-bytes",
   "consent_status": "granted_for_session",
   "retention_policy": "delete_after_enrichment",
   "created_at": "timestamp"
 }
 ```
+
+`shopping_list_id` is optional and distinct from the consent session. Free-text
+`related_item_candidate` never selects pantry truth. Any derived mask or crop inherits
+the source image's owner, consent status, retention policy, and deletion deadline.
+The canonical input digest is private, user-scoped audit metadata: it binds evidence
+to the exact server-reencoded bytes, is never exposed/logged or used across users,
+and is removed on full evidence privacy deletion.
 
 ---
 
@@ -1029,11 +1039,24 @@ product_review
 ```json
 {
   "detection_id": "det_001",
+  "job_id": "job_001",
   "image_id": "img_001",
+  "input_sha256": "sha256-of-canonical-reencoded-bytes",
   "label": "tomato",
   "bbox": [120, 80, 210, 190],
+  "coordinate_space": "inference_pixels",
+  "source_dimensions": [1920, 1080],
+  "inference_dimensions": [1280, 720],
+  "normalized_dimensions": [1920, 1080],
+  "source_exif_orientation": 1,
+  "scale": [0.6666667, 0.6666667],
+  "preprocessing_version": "1.0",
   "confidence": 0.86,
+  "engine_kind": "learned",
   "model_name": "grocery_detector_v1",
+  "model_version": "1.0.0",
+  "checkpoint_sha256": "sha256...",
+  "idempotency_key": "job:input_sha:model:region",
   "created_at": "timestamp"
 }
 ```
@@ -1045,11 +1068,16 @@ product_review
 ```json
 {
   "segmentation_id": "seg_001",
+  "job_id": "job_001",
   "image_id": "img_001",
+  "input_sha256": "sha256-of-canonical-reencoded-bytes",
   "detection_id": "det_001",
   "mask_uri": "s3://bucket/masks/seg_001.png",
   "crop_uri": "s3://bucket/crops/item_001.png",
-  "confidence": 0.81
+  "confidence": null,
+  "engine": "bbox_fallback",
+  "engine_version": "1.0",
+  "idempotency_key": "job:input_sha:detection:segmenter"
 }
 ```
 
@@ -1060,23 +1088,101 @@ product_review
 ```json
 {
   "ocr_id": "ocr_001",
+  "job_id": "job_001",
   "image_id": "img_001",
+  "input_sha256": "sha256-of-canonical-reencoded-bytes",
   "crop_uri": "s3://bucket/crops/item_001.png",
   "raw_text": "CHOBANI GREEK YOGURT 32 OZ",
-  "structured_fields": {
-    "brand": "Chobani",
-    "product_name": "Greek Yogurt",
-    "package_size": "32 oz"
-  },
-  "confidence": 0.84,
-  "engine": "paddleocr",
+  "structured_fields": [
+    { "field": "brand", "value": "Chobani", "source": "label_ocr", "confidence": 0.84, "status": "estimated" },
+    { "field": "product_name", "value": "Greek Yogurt", "source": "label_ocr", "confidence": 0.78, "status": "estimated" },
+    { "field": "package_size", "value": "32 oz", "source": "label_ocr", "confidence": 0.82, "status": "estimated" }
+  ],
+  "engine": "paddleocr-vl",
+  "engine_version": "1.6",
+  "checkpoint_sha256": "sha256...",
+  "idempotency_key": "job:input_sha:region:ocr",
   "created_at": "timestamp"
 }
 ```
 
 ---
 
-## 14.8 Product Enrichment Record
+## 14.8 Barcode Result
+
+```json
+{
+  "barcode_result_id": "barcode_001",
+  "job_id": "job_001",
+  "image_id": "img_001",
+  "input_sha256": "sha256-of-canonical-reencoded-bytes",
+  "symbology": "UPCA",
+  "value": "036000291452",
+  "checksum_valid": true,
+  "decoder": "zbar",
+  "decoder_version": "0.23.93",
+  "decoder_quality": 88,
+  "idempotency_key": "job:input_sha:region:barcode",
+  "created_at": "timestamp"
+}
+```
+
+Only checksum-valid decoded evidence is persisted. Decoder quality remains in its
+native scale and is not a calibrated probability. Product lookup belongs to Phase 7.
+
+---
+
+## 14.9 Vision Candidate Review
+
+```json
+{
+  "candidate_id": "candidate_001",
+  "job_id": "job_001",
+  "image_id": "img_001",
+  "input_sha256": "sha256-of-canonical-reencoded-bytes",
+  "shopping_item_id": null,
+  "pantry_item_id": null,
+  "field": "brand",
+  "candidate": {
+    "value": "Chobani",
+    "source": "label_ocr",
+    "confidence": 0.84,
+    "status": "estimated"
+  },
+  "evidence_type": "ocr",
+  "evidence_id": "ocr_001",
+  "resolution_status": "unmatched | ambiguous | ready",
+  "created_at": "timestamp"
+}
+```
+
+The candidate is immutable. Zero/multiple target matches remain review evidence and
+never become pantry truth.
+
+---
+
+## 14.10 Vision Candidate Outcome
+
+```json
+{
+  "outcome_id": "outcome_001",
+  "candidate_id": "candidate_001",
+  "pantry_item_id": "item_001",
+  "field": "brand",
+  "outcome": "applied | conflicting | rejected",
+  "ledger_change_id": "change_001 | null",
+  "reason_code": "lower_precedence | protected_user_value | auditor_blocked | applied",
+  "created_at": "timestamp"
+}
+```
+
+Outcomes are append-only and unique per candidate decision. Applied outcomes link to
+a `ledger_change_log` row whose nullable `candidate_id` points back to the candidate;
+conflicting/rejected outcomes have no ledger change but remain durable here.
+
+---
+
+## 14.11 Product Enrichment Record
 
 ```json
 {
@@ -1103,7 +1209,7 @@ product_review
 
 ---
 
-## 14.9 Consumption Event
+## 14.12 Consumption Event
 
 ```json
 {
@@ -1130,7 +1236,7 @@ product_review
 
 ---
 
-## 14.10 Preference Rule
+## 14.13 Preference Rule
 
 ```json
 {
@@ -1153,7 +1259,7 @@ product_review
 
 ---
 
-## 14.11 Background Job
+## 14.14 Background Job
 
 ```json
 {
@@ -1161,6 +1267,7 @@ product_review
   "job_type": "grocery_image_check_in",
   "status": "queued | processing | completed | failed | needs_review",
   "user_id": "user_001",
+  "shopping_list_id": "list_001",
   "image_ids": ["img_001", "img_002"],
   "created_at": "timestamp",
   "completed_at": null,
@@ -1171,15 +1278,19 @@ product_review
       "status": "completed"
     },
     {
-      "step": "segmentation",
-      "status": "queued"
-    },
-    {
       "step": "object_detection",
       "status": "queued"
     },
     {
+      "step": "segmentation",
+      "status": "queued"
+    },
+    {
       "step": "ocr",
+      "status": "queued"
+    },
+    {
+      "step": "barcode",
       "status": "queued"
     },
     {
@@ -1347,8 +1458,8 @@ Runs silent product understanding after post-shopping check-in.
 
 ### Responsibilities
 
-* call segmentation;
 * call object detection;
+* call segmentation;
 * call OCR;
 * call barcode detection;
 * call product enrichment;
@@ -1442,24 +1553,25 @@ Extracts text from labels, receipts, packaging, expiry labels, and nutrition pan
 
 ### Purpose
 
-Reads barcode when visible and queries product sources.
+Reads a barcode when visible and preserves exact evidence for Phase 7.
 
 ### Inputs
 
 * barcode crop;
 * image;
-* barcode number.
+* barcode number supplied by a scanner.
 
 ### Outputs
 
 * barcode value;
-* product lookup candidate;
-* confidence.
+* symbology, checksum result, and native decoder metadata.
 
 ### Forbidden Actions
 
 * must not invent barcode;
-* must not match product without reliable barcode value.
+* must not persist an invalid checksum;
+* must not present decoder quality as calibrated confidence;
+* must not perform product matching in Phase 6.
 
 ---
 
@@ -1665,7 +1777,7 @@ Shows uncertain estimated values to the user for confirmation/editing.
 
 ### Purpose
 
-Ensures every field has value, source, confidence, status, and editability.
+Ensures every field has value, source, confidence, status, editability, and evidence linkage.
 
 ### Inputs
 
@@ -1673,11 +1785,12 @@ Ensures every field has value, source, confidence, status, and editability.
 
 ### Outputs
 
-* source-tracked record.
+* validated, deterministically ordered source-tracked candidates.
 
 ### Forbidden Actions
 
 * must not merge values without retaining provenance.
+* must not select a winning value or duplicate ledger precedence rules.
 
 ---
 
@@ -1910,10 +2023,19 @@ Input:
 ```json
 {
   "shopping_session_id": "session_001",
+  "shopping_list_id": "list_001",
   "image_ids": ["img_001", "img_002"],
   "processing_mode": "silent_background_enrichment"
 }
 ```
+
+`shopping_list_id` is optional and must belong to the authenticated user. Automatic
+resolution requires one bought/crossed-off item with an exact normalized canonical
+label match, one confirmation event for that item, and one pantry row whose
+`source_event_id` equals that event. A user-selected shopping item may be used instead
+after the same ownership and confirmation checks. Zero or multiple matches abstain
+and persist a review candidate. OCR brand/product text and free text never select a
+target.
 
 ---
 
@@ -1931,6 +2053,11 @@ Input:
   "image_type": "product_label | receipt | pantry | grocery_check_in"
 }
 ```
+
+Requires authenticated ownership, an undeleted image, current processing consent,
+and rate limiting. It may persist idempotent evidence but never writes the ledger.
+Timeout/model-unavailable failures are typed and never expose raw model exceptions,
+storage URIs, or filesystem paths.
 
 ---
 
@@ -2532,4 +2659,3 @@ It should be a reliable grocery operating system.
 Final rule:
 
 > **Active help when the user asks. Silent enrichment only after post-shopping check-in. Every estimate is editable. The pantry ledger is the source of truth.**
-

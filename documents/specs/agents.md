@@ -66,7 +66,7 @@ Orchestration is LangGraph with LangSmith tracing (decided 2026-07-13, ADR 003).
 ## 6. Background Enrichment Agent
 
 **Purpose:** Run silent product understanding after post-shopping check-in.
-**Responsibilities:** call segmentation, detection, OCR, barcode, product enrichment; create estimated records; flag uncertain values.
+**Responsibilities:** call detection, segmentation, OCR, barcode, product enrichment; create estimated records; flag uncertain values.
 **Forbidden:** overwriting user-confirmed values; marking estimated fields as confirmed; calling the process "active learning."
 
 ## 7. Edge Vision Agent
@@ -92,10 +92,10 @@ Orchestration is LangGraph with LangSmith tracing (decided 2026-07-13, ADR 003).
 
 ## 10. Barcode Agent
 
-**Purpose:** Read barcodes when visible and query product sources.
+**Purpose:** Read barcodes when visible and preserve exact barcode evidence for later product lookup.
 **Inputs:** barcode crop; image; barcode number.
-**Outputs:** barcode value; product lookup candidate; confidence.
-**Forbidden:** inventing a barcode; matching a product without a reliable barcode value. Returns nothing rather than guessing.
+**Outputs:** validated barcode value and decoder metadata, or no result.
+**Forbidden:** inventing a barcode; treating decoder quality as a calibrated probability; matching a product in Phase 6. Product lookup belongs to the Product Enrichment Agent in Phase 7 and requires a reliable barcode value.
 
 ## 11. Product Enrichment Agent
 
@@ -147,10 +147,10 @@ Orchestration is LangGraph with LangSmith tracing (decided 2026-07-13, ADR 003).
 
 ## 18. Source Attribution Agent
 
-**Purpose:** Guarantee every field has value, source, confidence, status, editability before it reaches the ledger.
+**Purpose:** Guarantee every field has value, source, confidence, status, editability and evidence linkage before it reaches the ledger.
 **Inputs:** all candidate fields from other agents.
-**Outputs:** source-tracked SourcedField records.
-**Forbidden:** merging values without retaining provenance.
+**Outputs:** validated, deterministically ordered source-tracked candidate records.
+**Forbidden:** merging values without retaining provenance; choosing a winning ledger value or duplicating the precedence rules in `services/ledger.py`.
 
 ## 19. Auditor Agent
 

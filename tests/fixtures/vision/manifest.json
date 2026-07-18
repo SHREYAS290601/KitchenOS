@@ -1,0 +1,60 @@
+{
+  "coordinate_convention": "[x_min,y_min,x_max,y_max)",
+  "fixtures": [
+    {
+      "dimensions": [
+        8,
+        4
+      ],
+      "expected": {
+        "crop_bbox": [
+          2,
+          1,
+          6,
+          4
+        ],
+        "crop_pixel_sha256": "e7757838599bf002ae3e28579a8e686842951931bf1283cb3d3ddac69b7c1757",
+        "normalized_mode": "RGB",
+        "normalized_pixel_sha256": "ce283443d34e662159adc006d44506ee057f978bd3981a163f8564ba23f7fe3a"
+      },
+      "file": "rgb_landscape.png",
+      "mode": "RGB",
+      "pixel_sha256": "ce283443d34e662159adc006d44506ee057f978bd3981a163f8564ba23f7fe3a",
+      "sha256": "17c54ecc66dc4bf4f0da39ea309054e15961bcc9d7c97a1c42f9ebc594e2ddc2"
+    },
+    {
+      "dimensions": [
+        4,
+        4
+      ],
+      "expected": {
+        "alpha_background": "white",
+        "normalized_mode": "RGB",
+        "normalized_pixel_sha256": "cafbf02fad6213fe70cb4a7fd31f5b29b3065af06279e52bcd05ccfe10805dc3"
+      },
+      "file": "rgba_alpha.png",
+      "mode": "RGBA",
+      "pixel_sha256": "97f001d6a1a3720cba2b00b7fea9dadd6136cfdd4ef6bc1101f46db8663d8d52",
+      "sha256": "a3a9d696402149110602f6ba0228f981dca708a316b667b1bafe715bb31da8f8"
+    },
+    {
+      "dimensions": [
+        4,
+        6
+      ],
+      "expected": {
+        "channels": "replicated",
+        "normalized_mode": "RGB",
+        "normalized_pixel_sha256": "f1d77ce46d34e2979fd49fdb261a42071f42b598bc3050263c2d90d1104d3ff6"
+      },
+      "file": "grayscale.png",
+      "mode": "L",
+      "pixel_sha256": "13f816d8008275262c723d35bd3cd6e00757855ca9a3e7aa8521d616684cf1df",
+      "sha256": "c9f65d0c04d08166f4747b63211ac9fe2d28bf72e0fda9ff290435d1748aea54"
+    }
+  ],
+  "generator": "scripts/generate_vision_fixtures.py",
+  "license": "CC0-1.0",
+  "provenance": "synthetic",
+  "schema_version": 1
+}

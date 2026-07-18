@@ -111,7 +111,7 @@ Append-only. One row per applied field change, written in the same transaction b
 
 ```text
 id, pantry_item_id, field_name, old_value (JSONB), new_value (JSONB),
-source, confidence, actor (user | agent | worker), created_at
+source, confidence, actor (user | agent | worker), candidate_id (nullable), created_at
 ```
 
 Insert-only: no UPDATE or DELETE path.
@@ -162,8 +162,10 @@ Cross-off confirms **purchase only** — never brand, price, size, or nutrition.
   "capture_context": "post_shopping_check_in | while_shopping_query | label_scan | receipt",
   "processing_mode": "silent_background_enrichment | active_then_background_enrichment",
   "linked_shopping_session_id": "session_001",
+  "shopping_list_id": "list_001",
   "related_item_candidate": null,
   "storage_uri": "s3://bucket/img_001.jpg",
+  "content_sha256": "sha256-of-canonical-reencoded-bytes",
   "consent_status": "granted_for_session",
   "retention_policy": "delete_after_enrichment",
   "stored_for_future_enrichment": true,
@@ -177,13 +179,42 @@ Consent states: `not_requested | denied | granted_for_single_image | granted_for
 Retention policies: `delete_after_answer | delete_after_enrichment | keep_for_pantry_memory | keep_until_manually_deleted`.
 No image row may exist without a consent status (invariant 4).
 Post-shopping uploads that never become part of a job receive a short cleanup deadline. Session consent is server-issued, expires after eight hours, and is re-checked at upload, job creation, and every worker step.
+`shopping_list_id` is optional and distinct from the consent session. It is validated
+against the authenticated user and provides the only automatic route from vision
+evidence through `ShoppingConfirmationEvent → ShoppingItem → ShoppingList`. Free-text
+`related_item_candidate` is never sufficient to mutate a pantry item.
+`content_sha256` is computed from the canonical server-reencoded bytes before storage.
+It is scoped to the owning user's evidence, never used for cross-user correlation,
+never returned by public APIs or logs, and is deleted with the evidence record on a
+full privacy deletion. Normal byte-retention cleanup may retain the digest with the
+non-image evidence audit row so durable results remain bound to their exact input.
+
+Automatic target resolution is deliberately exact:
+
+1. Limit candidates to bought/crossed-off items in the user-owned shopping list.
+2. Accept either a user-selected `shopping_item_id` or exactly one normalized
+   detector-label = `ShoppingItem.canonical_name` match (Unicode-normalized,
+   case-folded, surrounding whitespace collapsed; no fuzzy/synonym matching).
+3. Require exactly one `ShoppingConfirmationEvent` for that shopping item and exactly
+   one same-user `PantryItem` whose `source_event_id` equals the event ID.
+4. OCR brand/product text and `related_item_candidate` never choose the target.
+5. Zero or multiple matches at any step abstain and create an
+   `unmatched`/`ambiguous` review candidate.
 
 ### 4.6 VisionDetection (`models/vision_detection.py`)
 
 ```json
-{ "detection_id": "det_001", "image_id": "img_001", "label": "tomato",
+{ "detection_id": "det_001", "job_id": "job_001", "image_id": "img_001",
+  "input_sha256": "sha256-of-canonical-reencoded-bytes", "label": "tomato",
   "bbox": [120, 80, 210, 190], "confidence": 0.86,
-  "model_name": "grocery_detector_v1", "created_at": "timestamp" }
+  "coordinate_space": "inference_pixels",
+  "source_dimensions": [1920, 1080], "normalized_dimensions": [1920, 1080],
+  "inference_dimensions": [1280, 720], "scale": [0.6666667, 0.6666667],
+  "source_exif_orientation": 1,
+  "preprocessing_version": "1.0",
+  "engine_kind": "learned", "model_name": "grocery_detector_v1", "model_version": "1.0.0",
+  "checkpoint_sha256": "sha256...", "idempotency_key": "job:input_sha:model:region",
+  "created_at": "timestamp" }
 ```
 
 Category/count evidence only — never brand identity.
@@ -191,21 +222,91 @@ Category/count evidence only — never brand identity.
 ### 4.7 SegmentationResult (`models/segmentation_result.py`)
 
 ```json
-{ "segmentation_id": "seg_001", "image_id": "img_001", "detection_id": "det_001",
+{ "segmentation_id": "seg_001", "job_id": "job_001", "image_id": "img_001",
+  "input_sha256": "sha256-of-canonical-reencoded-bytes", "detection_id": "det_001",
   "mask_uri": "s3://bucket/masks/seg_001.png",
-  "crop_uri": "s3://bucket/crops/item_001.png", "confidence": 0.81 }
+  "crop_uri": "s3://bucket/crops/item_001.png", "confidence": null,
+  "engine": "bbox_fallback", "engine_version": "1.0.0",
+  "checkpoint_sha256": null, "idempotency_key": "job:input_sha:detection:segmenter" }
 ```
+
+Masks and crops inherit the source image's owner, consent state, retention policy,
+and retention deadline. Cleanup deletes derived assets idempotently when the source
+is revoked or expires.
 
 ### 4.8 OCRResult (`models/ocr_result.py`)
 
 ```json
-{ "ocr_id": "ocr_001", "image_id": "img_001", "crop_uri": "s3://bucket/crops/item_001.png",
+{ "ocr_id": "ocr_001", "job_id": "job_001", "image_id": "img_001",
+  "input_sha256": "sha256-of-canonical-reencoded-bytes", "segmentation_id": "seg_001",
+  "crop_uri": "s3://bucket/crops/item_001.png",
   "raw_text": "CHOBANI GREEK YOGURT 32 OZ",
-  "structured_fields": { "brand": "Chobani", "product_name": "Greek Yogurt", "package_size": "32 oz" },
-  "confidence": 0.84, "engine": "paddleocr-vl-1.6", "created_at": "timestamp" }
+  "structured_fields": [
+    { "field": "brand", "value": "Chobani", "source": "label_ocr", "confidence": 0.84, "status": "estimated" },
+    { "field": "product_name", "value": "Greek Yogurt", "source": "label_ocr", "confidence": 0.78, "status": "estimated" },
+    { "field": "package_size", "value": "32 oz", "source": "label_ocr", "confidence": 0.82, "status": "estimated" }
+  ],
+  "engine": "paddleocr-vl-1.6", "engine_version": "1.6",
+  "checkpoint_sha256": "sha256...", "idempotency_key": "job:input_sha:region:ocr",
+  "created_at": "timestamp" }
 ```
 
-Structured fields are candidates — they enter the ledger as estimates via Source Attribution, never as confirmed values.
+Structured fields are immutable candidates with per-field confidence. Raw OCR text
+is preserved separately and is never silently corrected. `package_size` remains
+evidence until the pantry schema gains a corresponding sourced field; it is never
+coerced into quantity.
+
+### 4.8.1 BarcodeResult (`models/barcode_result.py`)
+
+```json
+{ "barcode_result_id": "barcode_001", "job_id": "job_001", "image_id": "img_001",
+  "input_sha256": "sha256-of-canonical-reencoded-bytes",
+  "segmentation_id": "seg_001", "symbology": "UPCA", "value": "036000291452",
+  "checksum_valid": true, "decoder": "zbar", "decoder_version": "0.23.93",
+  "decoder_quality": 88, "idempotency_key": "job:input_sha:region:barcode",
+  "created_at": "timestamp" }
+```
+
+The decoded value is durable evidence for Phase 7. Decoder quality is stored in its
+native scale and is not exposed as a calibrated 0–1 probability. Invalid checksums
+and unreadable images produce no result rather than a guessed value.
+
+### 4.8.2 VisionCandidateReview (`models/vision_candidate_review.py`)
+
+```json
+{ "candidate_id": "candidate_001", "job_id": "job_001", "image_id": "img_001",
+  "input_sha256": "sha256-of-canonical-reencoded-bytes",
+  "shopping_item_id": null, "pantry_item_id": null, "field": "brand",
+  "candidate": { "value": "Chobani", "source": "label_ocr", "confidence": 0.84, "status": "estimated" },
+  "evidence_type": "ocr", "evidence_id": "ocr_001",
+  "resolution_status": "unmatched | ambiguous | ready",
+  "created_at": "timestamp" }
+```
+
+This append-only candidate record retains losing, ambiguous, and unmatched
+provenance. Its initial resolution status is immutable (`unmatched | ambiguous |
+ready`). A later ledger outcome is a separate append-only change/conflict log linked
+by `candidate_id`; the candidate row is never rewritten to `applied` or
+`conflicting`. Only `ready` candidates resolved through explicit purchase context
+may be sent to `apply_update()`; the ledger remains the sole precedence/conflict
+authority.
+
+### 4.8.3 VisionCandidateOutcome (`models/vision_candidate_outcome.py`)
+
+```json
+{ "outcome_id": "outcome_001", "candidate_id": "candidate_001",
+  "pantry_item_id": "item_001", "field": "brand",
+  "outcome": "applied | conflicting | rejected",
+  "ledger_change_id": "change_001 | null",
+  "reason_code": "lower_precedence | protected_user_value | auditor_blocked | applied",
+  "created_at": "timestamp" }
+```
+
+One immutable outcome is inserted for each candidate decision. An applied outcome
+links to a `LedgerChangeLog` row through both `ledger_change_id` and that row's
+nullable `candidate_id`. Conflicting/rejected outcomes have no ledger change but are
+retained here. This makes every candidate terminal decision durable without mutating
+the candidate row.
 
 ### 4.9 ProductEnrichmentRecord (`models/product_enrichment.py`)
 
@@ -265,6 +366,7 @@ Rules: strong preferences only after first use (before first use → `preference
   "job_type": "grocery_image_check_in",
   "status": "queued | processing | completed | failed | needs_review",
   "user_id": "user_001",
+  "shopping_list_id": "list_001",
   "image_ids": ["img_001", "img_002"],
   "created_at": "timestamp",
   "completed_at": null,
@@ -273,8 +375,8 @@ Rules: strong preferences only after first use (before first use → `preference
   "error": null,
   "steps": [
     { "step": "image_storage",      "status": "completed" },
-    { "step": "segmentation",       "status": "queued" },
     { "step": "object_detection",   "status": "queued" },
+    { "step": "segmentation",       "status": "queued" },
     { "step": "ocr",                "status": "queued" },
     { "step": "barcode",            "status": "queued" },
     { "step": "product_enrichment", "status": "queued" }
@@ -283,6 +385,9 @@ Rules: strong preferences only after first use (before first use → `preference
 ```
 
 Written in the same transaction as the check-in request. The job row — not Celery — is the durable source of truth for status. A leased dispatch claim prevents duplicate pipeline publication while a periodic relay recovers committed jobs after broker failures. `retention_enforced_at` makes terminal cleanup idempotent.
+`shopping_list_id` is optional and never aliases the consent session. Workers claim a
+short lease, release the database connection during model inference, re-check consent,
+and persist results with unique idempotency keys in a new transaction.
 
 ---
 

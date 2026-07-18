@@ -94,7 +94,7 @@ App factory pattern: `backend/app/main.py::create_app()` builds Settings, engine
 
 ## 5. Background jobs: Redis + Celery
 
-The silent check-in pipeline (Manifest §7) is a real multi-step DAG — segmentation → detection → OCR → barcode → enrichment → audit — long-running, must survive API restarts, and needs per-step status for the `BackgroundJob` model.
+The silent check-in pipeline (Manifest §7) is a real multi-step DAG — detection → segmentation → OCR → barcode → enrichment → audit — long-running, must survive API restarts, and needs per-step status for the `BackgroundJob` model. Detection owns the canonical bounding boxes; segmentation consumes those persisted detections and may fall back to deterministic bbox crops when the configured mask model is unavailable.
 
 **Decision: Celery with Redis broker/result backend.**
 
@@ -106,7 +106,7 @@ Durability rule: **the `BackgroundJob` row is written in the same DB transaction
 
 - `backend/app/storage/` exposes `put_image`, `get_uri`, `delete`, `open` behind an interface. Implementations selected by config: local filesystem for quick dev, **MinIO** in docker compose (same S3 API as production, so code paths never fork), S3-compatible in production.
 - `storage_uri` / `mask_uri` / `crop_uri` on the evidence records are opaque URIs the abstraction resolves.
-- **Retention is data, not code**: every image row carries `consent_status` and `retention_policy`. A Celery beat task enforces `delete_after_answer` / `delete_after_enrichment` / `keep_until_manually_deleted`.
+- **Retention is data, not code**: every image row carries `consent_status` and `retention_policy`. Every derived crop and mask inherits the source image's owner, consent state, and retention deadline. A Celery beat task idempotently enforces `delete_after_answer` / `delete_after_enrichment` / `keep_until_manually_deleted` across originals and all derived assets.
 
 ## 7. LLM agent layer
 
@@ -148,6 +148,29 @@ user_edited / user_confirmed   (highest)
 ```
 
 An incoming field is applied only if its precedence ≥ the stored field's precedence **and** it does not downgrade a user-confirmed/edited value; otherwise it is recorded as `conflicting`. Every applied change writes a `ledger_change_log` row in the same transaction — "no unsourced write" and "full audit trail" are structural, not reviewer-dependent.
+
+Source Attribution validates and orders typed candidates but does not implement a
+second precedence algorithm. `services/ledger.py::apply_update()` remains the sole
+winner/conflict authority. Vision evidence is associated with a pantry item only
+through an explicit shopping-list/purchase context. Ambiguous or unmatched evidence
+is persisted for review and never creates or mutates pantry truth.
+
+## 9.1 Vision runtime and worker boundary
+
+- Unit tests and the default worker environment import only lightweight protocols,
+  immutable result contracts, and Pillow preprocessing. Model runtimes and native
+  decoders are optional profiles loaded lazily inside adapters.
+- Model assets are local, versioned, and checksum-verified. Constructors fail with a
+  typed `ModelAssetsUnavailable` error instead of downloading weights.
+- The canonical server-reencoded input SHA-256 binds inference and idempotency to the
+  exact bytes that produced durable evidence. It is user-scoped private audit
+  metadata, never a public identifier, log field, or cross-user deduplication key.
+- A worker uses a short database claim/lease, releases the connection before
+  inference, re-checks consent before reading bytes and before persistence, then
+  persists idempotently in a short transaction. Database advisory locks and open
+  transactions must never span model inference.
+- CPU and GPU integrations are explicit opt-in test profiles. The default pytest run
+  requires no model packages, weights, native barcode library, GPU, or network.
 
 ## 10. Testing strategy
 

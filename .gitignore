@@ -20,3 +20,6 @@ dist/
 
 # User data (never commit uploads)
 data/user_uploads/
+
+# Downloaded model assets (version/checksum manifests are committed separately)
+data/models/
