@@ -8,7 +8,7 @@
 
 **Tech Stack:** Celery 5 (Redis broker + result backend, eager mode in tests), Redis 7 (already in compose from Phase 1), SQLAlchemy 2.0, FastAPI, pytest. Mobile: Expo image picker, Jest + @testing-library/react-native.
 
-**Out of scope for Phase 5** (later plans): real segmentation/detection/OCR/barcode models (Phase 6 — stubs here), product API enrichment (Phase 7), recipe/consumption logic (Phase 8).
+**Out of scope for Phase 5** (later plans): real segmentation/detection/OCR/barcode models (Phase 6 — stubs here), product API enrichment (Phase 7), recipe/consumption logic (Phase 8). Shopping-list CRUD, active-list selection, and the visible top-level checklist entry remain a Phase 3 corrective follow-up; this phase owns only the route-level handoff from an already-active checklist into check-in.
 
 **Prerequisites:** Phases 1–4 complete: compose stack (postgres/redis/minio) healthy, ledger write path (`services/ledger.py::apply_update`) green, consent service + image storage (`services/consent.py`, `services/image_storage.py`, `storage/`) from Phase 4 working.
 
@@ -246,6 +246,14 @@ def test_job_status_endpoint_returns_steps(client, db, queued_job):
 
 - [x] **Step 4: Verify pass. Commit** — `feat(mobile): accessible check-in screen with background status polling`
 
+- [x] **Step 5: Complete the check-in UX state model** — cover empty, ready, submitting, processing, completed, `needs_review`, and failed states with explicit text; keep selected photos available after a recoverable failure; re-run consent, upload, and job creation on retry; clear local selections only after successful terminal processing.
+
+- [x] **Step 6: Make consent and retention behavior visible and truthful** — distinguish optional shopping-list context from the photo-consent session, show capture guidance before selection, state that confirmed pantry values are protected, and describe completed-job photos as *scheduled* for deletion because retention runs after enrichment.
+
+- [x] **Step 7: Add the checklist handoff contract** — wire the shopping route so an already-active checklist’s accessible “Finish shopping · Check in groceries” action opens grocery check-in with display-only shopping context; the check-in still creates a separate server-issued photo-consent session. Visible active-list discovery remains in the Phase 3 corrective follow-up.
+
+- [x] **Step 8: Verify the corrected flow** — targeted Jest coverage includes the empty-state guidance, processing live region, all terminal states, retry/photo preservation, picker-error preservation, and the checklist handoff.
+
 ---
 
 ## Done criteria for Phase 5
@@ -254,7 +262,8 @@ def test_job_status_endpoint_returns_steps(client, db, queued_job):
 - Celery chain runs all five stub steps end to end in eager mode with correct per-step status and §7 ordering.
 - Consent enforced at the endpoint and re-checked in every worker step; zero-image check-in is impossible.
 - Background Enrichment Agent provably never touches user-confirmed fields and never confirms an estimate.
-- Retention policies enforced by the beat task; mobile check-in screen accessible and green.
+- Retention policies enforced by the beat task; mobile check-in screen is accessible, has explicit lifecycle states, preserves recoverable work, and uses retention copy consistent with the asynchronous cleanup boundary.
+- An already-active shopping checklist can hand display-only context to grocery check-in while photo consent remains a separate session-scoped decision; active-list discovery and item CRUD remain explicitly deferred to the Phase 3 corrective follow-up.
 
 ## Next phase
 

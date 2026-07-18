@@ -11,10 +11,16 @@ import {
   saveChecklist,
 } from "../storage/checklistCache";
 
-export function ChecklistScreen({ listId }: { listId: string }) {
+type Props = {
+  listId: string;
+  onFinishShopping?: (listId: string) => void;
+};
+
+export function ChecklistScreen({ listId, onFinishShopping }: Props) {
   const [items, setItems] = useState<ChecklistItem[]>([]);
   const [pending, setPending] = useState<string[]>([]);
   const [announcement, setAnnouncement] = useState("");
+  const [focusedControl, setFocusedControl] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -145,6 +151,23 @@ export function ChecklistScreen({ listId }: { listId: string }) {
             })}
         </View>
       ))}
+      {onFinishShopping ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Finish shopping and check in groceries"
+          onFocus={() => setFocusedControl("finish")}
+          onBlur={() => setFocusedControl(null)}
+          onPress={() => onFinishShopping(listId)}
+          style={[
+            styles.finishButton,
+            focusedControl === "finish" && styles.focused,
+          ]}
+        >
+          <Text style={styles.finishButtonText}>
+            Finish shopping · Check in groceries
+          </Text>
+        </Pressable>
+      ) : null}
     </ScrollView>
   );
 }
@@ -176,4 +199,14 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, color: "#111827" },
   nameCrossed: { textDecorationLine: "line-through" },
   statusText: { fontSize: 13, color: "#374151" },
+  finishButton: {
+    minHeight: 48,
+    paddingHorizontal: 16,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0F766E",
+  },
+  finishButtonText: { fontSize: 16, fontWeight: "700", color: "white" },
+  focused: { borderColor: "#0F172A", borderWidth: 3 },
 });

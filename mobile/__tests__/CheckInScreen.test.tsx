@@ -5,12 +5,27 @@ import * as ImagePicker from "expo-image-picker";
 import { CheckInScreen, pickGroceryPhotos } from "../screens/CheckInScreen";
 
 const makeProps = () => ({
-  shoppingSessionId: "client-session",
+  consentSessionId: "client-session",
+  shoppingListLabel: "Saturday run",
   pickPhotos: jest.fn().mockResolvedValue(["file:///groceries-1.jpg"]),
   grantConsent: jest.fn().mockResolvedValue({ ok: true as const, sessionId: "server-session" }),
   uploadPhoto: jest.fn().mockResolvedValue({ ok: true as const, imageId: "11111111-1111-1111-1111-111111111111" }),
   postCheckIn: jest.fn().mockResolvedValue({ ok: true as const, data: { jobId: "22222222-2222-2222-2222-222222222222", status: "queued", steps: [] } }),
   getJobStatus: jest.fn().mockResolvedValue({ ok: true as const, data: { jobId: "22222222-2222-2222-2222-222222222222", status: "completed", steps: [] } }),
+});
+
+it("explains the empty check-in state, photo guidance, consent, and retention", async () => {
+  const props = makeProps();
+  await render(<CheckInScreen {...props} />);
+
+  expect(screen.getByText("No grocery photos yet")).toBeTruthy();
+  expect(screen.getByText("Saturday run · Shopping list context")).toBeTruthy();
+  expect(screen.getByText("Photo consent stays separate and is confirmed when you start.")).toBeTruthy();
+  expect(screen.getByText("Spread products apart and include visible labels when possible.")).toBeTruthy();
+  expect(screen.getByText("Photo use: This shopping session")).toBeTruthy();
+  expect(screen.getByText("Retention: Delete photos after enrichment")).toBeTruthy();
+  expect(screen.getByText("Confirmed pantry values will not be overwritten.")).toBeTruthy();
+  expect(screen.queryByTestId("check-in-status")).toBeNull();
 });
 
 
@@ -22,6 +37,11 @@ it("renders an accessible multi-photo picker", async () => {
 
   expect(props.pickPhotos).toHaveBeenCalledTimes(1);
   expect(await screen.findByText("1 photo selected")).toBeTruthy();
+  expect(screen.getByText("Ready to start")).toBeTruthy();
+  const submit = screen.getByRole("button", { name: "Start grocery check-in" });
+  await fireEvent(submit, "focus");
+  expect(submit).toHaveStyle({ borderColor: "#0F172A", borderWidth: 3 });
+  await fireEvent(submit, "blur");
 });
 
 
@@ -38,6 +58,7 @@ it("blocks zero-photo submission with a field-specific error", async () => {
 
 it("submits photos and announces background processing", async () => {
   const props = makeProps();
+  props.getJobStatus.mockReturnValue(new Promise(() => {}));
   await render(<CheckInScreen {...props} />);
   await fireEvent.press(screen.getByRole("button", { name: "Add grocery photos" }));
 
@@ -202,13 +223,16 @@ it("keeps already bounded images at their original dimensions", async () => {
 
 it("shows a picker error without changing the selection", async () => {
   const props = makeProps();
-  props.pickPhotos.mockRejectedValue(new Error("picker unavailable"));
+  props.pickPhotos
+    .mockResolvedValueOnce(["file:///groceries-1.jpg"])
+    .mockRejectedValueOnce(new Error("picker unavailable"));
   await render(<CheckInScreen {...props} />);
 
   await fireEvent.press(screen.getByRole("button", { name: "Add grocery photos" }));
+  await fireEvent.press(screen.getByRole("button", { name: "Add grocery photos" }));
 
   expect(await screen.findByText("Grocery photos could not be selected")).toBeTruthy();
-  expect(screen.getByText("0 photos selected")).toBeTruthy();
+  expect(screen.getByText("1 photo selected")).toBeTruthy();
 });
 
 
@@ -256,15 +280,140 @@ it("shows check-in creation failures and allows a retry", async () => {
 
 it("uses safe copy when a background job fails", async () => {
   const props = makeProps();
+  props.getJobStatus
+    .mockResolvedValueOnce({
+      ok: true,
+      data: { jobId: "22222222-2222-2222-2222-222222222222", status: "failed", steps: [] },
+    })
+    .mockReturnValue(new Promise(() => {}));
+  await render(<CheckInScreen {...props} />);
+  await fireEvent.press(screen.getByRole("button", { name: "Add grocery photos" }));
+  await fireEvent.press(screen.getByRole("button", { name: "Start grocery check-in" }));
+
+  expect(await screen.findByText("Check-in needs attention")).toBeTruthy();
+  expect(screen.getByText("Processing stopped safely. Your confirmed pantry values were not changed.")).toBeTruthy();
+  expect(screen.getByText("You can adjust the selected photos before retrying.")).toBeTruthy();
+  expect(screen.getByText("1 photo selected")).toBeTruthy();
+
+  const retry = screen.getByRole("button", { name: "Retry grocery check-in" });
+  await fireEvent(retry, "focus");
+  expect(retry).toHaveStyle({ borderColor: "#0F172A", borderWidth: 3 });
+  await fireEvent(retry, "blur");
+  await fireEvent.press(screen.getByRole("button", { name: "Retry grocery check-in" }));
+
+  await waitFor(() => expect(props.postCheckIn).toHaveBeenCalledTimes(2));
+  expect(props.grantConsent).toHaveBeenCalledTimes(2);
+  expect(props.uploadPhoto).toHaveBeenCalledTimes(2);
+});
+
+it("shows a completed state and lets the user start another check-in", async () => {
+  const props = makeProps();
+  await render(<CheckInScreen {...props} />);
+  await fireEvent.press(screen.getByRole("button", { name: "Add grocery photos" }));
+  await fireEvent.press(screen.getByRole("button", { name: "Start grocery check-in" }));
+
+  expect(await screen.findByText("Check-in complete")).toBeTruthy();
+  expect(screen.getByText("Photos are scheduled for deletion after enrichment.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Add grocery photos" })).toBeNull();
+  const startAnother = screen.getByRole("button", { name: "Start another check-in" });
+  await fireEvent(startAnother, "focus");
+  expect(startAnother).toHaveStyle({ borderColor: "#0F172A", borderWidth: 3 });
+  await fireEvent(startAnother, "blur");
+  await fireEvent.press(startAnother);
+
+  expect(screen.getByText("No grocery photos yet")).toBeTruthy();
+  expect(screen.getByText("0 photos selected")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Add grocery photos" })).toBeTruthy();
+});
+
+it("distinguishes estimates that need review from a completed check-in", async () => {
+  const props = makeProps();
   props.getJobStatus.mockResolvedValue({
     ok: true,
-    data: { jobId: "22222222-2222-2222-2222-222222222222", status: "failed", steps: [] },
+    data: {
+      jobId: "22222222-2222-2222-2222-222222222222",
+      status: "needs_review",
+      steps: [],
+    },
   });
   await render(<CheckInScreen {...props} />);
   await fireEvent.press(screen.getByRole("button", { name: "Add grocery photos" }));
   await fireEvent.press(screen.getByRole("button", { name: "Start grocery check-in" }));
 
-  expect(await screen.findByText("Processing stopped. Please start a new check-in.")).toBeTruthy();
+  expect(await screen.findByText("Check-in complete — estimates need review")).toBeTruthy();
+  expect(screen.getByText("Review uncertain fields before confirming them.")).toBeTruthy();
+});
+
+it("requires an explicit consent-renewal action after consent is revoked", async () => {
+  const props = makeProps();
+  props.getJobStatus
+    .mockResolvedValueOnce({
+      ok: true,
+      data: {
+        jobId: "22222222-2222-2222-2222-222222222222",
+        status: "failed",
+        steps: [],
+        error: "consent_revoked",
+      },
+    })
+    .mockReturnValue(new Promise(() => {}));
+  await render(<CheckInScreen {...props} />);
+  await fireEvent.press(screen.getByRole("button", { name: "Add grocery photos" }));
+  await fireEvent.press(screen.getByRole("button", { name: "Start grocery check-in" }));
+
+  expect(await screen.findByText("Photo consent changed while processing.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Retry grocery check-in" })).toBeNull();
+  expect(props.grantConsent).toHaveBeenCalledTimes(1);
+
+  const renewConsent = screen.getByRole("button", {
+    name: "Allow selected photos for this check-in and retry",
+  });
+  await fireEvent(renewConsent, "focus");
+  expect(renewConsent).toHaveStyle({ borderColor: "#0F172A", borderWidth: 3 });
+  await fireEvent(renewConsent, "blur");
+  await fireEvent.press(renewConsent);
+
+  await waitFor(() => expect(props.grantConsent).toHaveBeenCalledTimes(2));
+  expect(props.uploadPhoto).toHaveBeenCalledTimes(2);
+});
+
+it("recovers when an unexpected retry dependency rejects", async () => {
+  const props = makeProps();
+  props.getJobStatus
+    .mockResolvedValueOnce({
+      ok: true,
+      data: {
+        jobId: "22222222-2222-2222-2222-222222222222",
+        status: "failed",
+        steps: [],
+        error: "processing_failed",
+      },
+    })
+    .mockReturnValue(new Promise(() => {}));
+  props.grantConsent
+    .mockResolvedValueOnce({ ok: true, sessionId: "server-session" })
+    .mockRejectedValueOnce(new Error("unexpected dependency failure"));
+  await render(<CheckInScreen {...props} />);
+  await fireEvent.press(screen.getByRole("button", { name: "Add grocery photos" }));
+  await fireEvent.press(screen.getByRole("button", { name: "Start grocery check-in" }));
+  expect(await screen.findByText("Check-in needs attention")).toBeTruthy();
+
+  await fireEvent.press(screen.getByRole("button", { name: "Retry grocery check-in" }));
+
+  expect(await screen.findByText("Check-in could not start. Please try again.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Retry grocery check-in" })).toBeTruthy();
+});
+
+it("turns a thrown polling failure into a recoverable status message", async () => {
+  const props = makeProps();
+  props.getJobStatus
+    .mockRejectedValueOnce(new Error("network interrupted"))
+    .mockReturnValue(new Promise(() => {}));
+  await render(<CheckInScreen {...props} />);
+  await fireEvent.press(screen.getByRole("button", { name: "Add grocery photos" }));
+  await fireEvent.press(screen.getByRole("button", { name: "Start grocery check-in" }));
+
+  expect(await screen.findByText("Check-in status is temporarily unavailable")).toBeTruthy();
 });
 
 
@@ -277,6 +426,8 @@ it("locks photo selection while consent and upload are in flight", async () => {
 
   await fireEvent.press(screen.getByRole("button", { name: "Start grocery check-in" }));
 
+  expect(screen.getByText("Starting grocery check-in")).toBeTruthy();
+  expect(screen.getByTestId("check-in-status").props.accessibilityLiveRegion).toBe("polite");
   expect(screen.getByRole("button", { name: "Add grocery photos" }).props.accessibilityState.disabled).toBe(true);
   expect(screen.getByRole("button", { name: "Remove selected grocery photo 1" }).props.accessibilityState.disabled).toBe(true);
   resolveConsent({ ok: false, message: "Consent canceled" });

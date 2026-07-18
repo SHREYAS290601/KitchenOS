@@ -84,4 +84,23 @@ describe("ChecklistScreen", () => {
     const milk = screen.getByRole("checkbox", { name: "Cross off milk" });
     expect(milk.props.accessibilityState.checked).toBe(true);
   });
+
+  it("hands the active shopping list to grocery check-in", async () => {
+    const onFinishShopping = jest.fn();
+    await render(
+      <ChecklistScreen
+        listId="list-1"
+        onFinishShopping={onFinishShopping}
+      />,
+    );
+
+    const finish = await screen.findByRole("button", {
+      name: "Finish shopping and check in groceries",
+    });
+    await fireEvent(finish, "focus");
+    expect(finish).toHaveStyle({ borderColor: "#0F172A", borderWidth: 3 });
+    await fireEvent.press(finish);
+
+    expect(onFinishShopping).toHaveBeenCalledWith("list-1");
+  });
 });
